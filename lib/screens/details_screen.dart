@@ -1,30 +1,22 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:flutter_riverpod/legacy.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import '../models/anime_media.dart';
 import '../api/scraper_api.dart';
+import '../providers/history_provider.dart';
+import '../providers/anime_provider.dart';
 import 'video_player_screen.dart';
-
-final episodesProvider = FutureProvider.family<List<String>, String>((ref, showId) async {
-  return ScraperApi().getEpisodesList(showId);
-});
-
-final scraperIdProvider = FutureProvider.family<String?, ({String title, String? englishTitle})>((ref, arg) async {
-  final results = await ScraperApi().search(arg.title);
-  if (results.isNotEmpty) return results.first['id'];
-  if (arg.englishTitle != null) {
-    final engResults = await ScraperApi().search(arg.englishTitle!);
-    if (engResults.isNotEmpty) return engResults.first['id'];
-  }
-  return null;
-});
 
 class DetailsScreen extends ConsumerWidget {
   final AnimeMedia anime;
   const DetailsScreen({super.key, required this.anime});
+
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final showIdAsync = ref.watch(scraperIdProvider((title: anime.title, englishTitle: anime.englishTitle)));
+    final mode = ref.watch(selectedModeProvider);
+    final showIdAsync = ref.watch(scraperIdProvider((title: anime.title, englishTitle: anime.englishTitle, mode: mode)));
+    final historyAsync = ref.watch(historyProvider);
 
     return Scaffold(
       body: CustomScrollView(
@@ -32,11 +24,21 @@ class DetailsScreen extends ConsumerWidget {
           SliverAppBar(
             expandedHeight: 300,
             pinned: true,
+            leading: Padding(
+              padding: const EdgeInsets.all(8.0),
+              child: CircleAvatar(
+                backgroundColor: Colors.black.withOpacity(0.5),
+                child: IconButton(
+                  icon: const Icon(Icons.arrow_back, color: Colors.white),
+                  onPressed: () => Navigator.pop(context),
+                ),
+              ),
+            ),
             flexibleSpace: FlexibleSpaceBar(
               background: CachedNetworkImage(
                 imageUrl: anime.bannerUrl ?? anime.coverUrl ?? '',
                 fit: BoxFit.cover,
-                color: Colors.black.withValues(alpha: 0.4),
+                color: Colors.black.withOpacity(0.4),
                 colorBlendMode: BlendMode.darken,
               ),
             ),
@@ -69,44 +71,93 @@ class DetailsScreen extends ConsumerWidget {
                     overflow: TextOverflow.ellipsis,
                   ),
                   const SizedBox(height: 24),
-                  const Text('Episodes', style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      const Text('Episodes', style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
+                      SegmentedButton<String>(
+                        segments: const [
+                          ButtonSegment(value: 'sub', label: Text('Sub'), icon: Icon(Icons.closed_caption)),
+                          ButtonSegment(value: 'dub', label: Text('Dub'), icon: Icon(Icons.mic)),
+                        ],
+                        selected: {mode},
+                        onSelectionChanged: (newSelection) {
+                          ref.read(selectedModeProvider.notifier).state = newSelection.first;
+                        },
+                        showSelectedIcon: false,
+                        style: SegmentedButton.styleFrom(
+                          visualDensity: VisualDensity.compact,
+                          padding: const EdgeInsets.symmetric(horizontal: 12),
+                          selectedForegroundColor: Colors.white,
+                          selectedBackgroundColor: Theme.of(context).primaryColor,
+                        ),
+                      ),
+                    ],
+                  ),
                   const SizedBox(height: 12),
                   showIdAsync.when(
                     data: (id) {
                       if (id == null) return const Center(child: Text('No streaming source found for this series.'));
-                      return ref.watch(episodesProvider(id)).when(
+                      return ref.watch(episodesProvider((showId: id, mode: mode))).when(
                         data: (eps) => ListView.builder(
                           shrinkWrap: true,
                           physics: const NeverScrollableScrollPhysics(),
                           itemCount: eps.length,
-                          itemBuilder: (c, i) => ListTile(
-                            contentPadding: const EdgeInsets.symmetric(vertical: 4),
-                            leading: Container(
-                              width: 45,
-                              height: 45,
-                              alignment: Alignment.center,
-                              decoration: BoxDecoration(
-                                color: Colors.white.withValues(alpha: 0.05),
-                                borderRadius: BorderRadius.circular(8),
-                                border: Border.all(color: Colors.white10),
-                              ),
-                              child: Text(eps[i], style: const TextStyle(fontWeight: FontWeight.bold)),
-                            ),
-                            title: Text('Episode ${eps[i]}'),
-                            trailing: const Icon(Icons.play_circle_fill, color: Colors.white54),
-                            onTap: () {
-                              Navigator.push(
-                                context,
-                                MaterialPageRoute(
-                                  builder: (c) => VideoPlayerScreen(
-                                    showId: id,
-                                    episodeNumber: eps[i],
-                                    title: '${anime.title} - Ep ${eps[i]}',
+                          itemBuilder: (c, i) {
+                            final epNum = eps[i];
+                            final history = historyAsync.value;
+                            final progress = history?['${id}_$epNum'];
+
+                            return Column(
+                              children: [
+                                ListTile(
+                                  contentPadding: const EdgeInsets.symmetric(vertical: 4),
+                                  leading: Container(
+                                    width: 45,
+                                    height: 45,
+                                    alignment: Alignment.center,
+                                    decoration: BoxDecoration(
+                                      color: Colors.white.withOpacity(0.05),
+                                      borderRadius: BorderRadius.circular(8),
+                                      border: Border.all(color: Colors.white10),
+                                    ),
+                                    child: Text(epNum, style: const TextStyle(fontWeight: FontWeight.bold)),
                                   ),
+                                  title: Text('Episode $epNum'),
+                                  trailing: const Icon(Icons.play_circle_fill, color: Colors.white54),
+                                  onTap: () {
+                                    Navigator.push(
+                                      context,
+                                      MaterialPageRoute(
+                                        builder: (c) => VideoPlayerScreen(
+                                          animeId: anime.id,
+                                          showId: id,
+                                          episodes: eps,
+                                          initialIndex: i,
+                                          mode: mode,
+                                          title: anime.title,
+                                          imageUrl: anime.coverUrl,
+                                        ),
+                                      ),
+                                    );
+                                  },
                                 ),
-                              );
-                            },
-                          ),
+                                if (progress != null && progress.percent > 0)
+                                  Padding(
+                                    padding: const EdgeInsets.symmetric(horizontal: 16),
+                                    child: ClipRRect(
+                                      borderRadius: BorderRadius.circular(2),
+                                      child: LinearProgressIndicator(
+                                        value: progress.percent,
+                                        backgroundColor: Colors.white10,
+                                        color: Colors.red,
+                                        minHeight: 3,
+                                      ),
+                                    ),
+                                  ),
+                              ],
+                            );
+                          },
                         ),
                         loading: () => const Center(child: Padding(
                           padding: EdgeInsets.all(20.0),
