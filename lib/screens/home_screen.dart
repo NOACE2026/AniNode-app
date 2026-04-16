@@ -6,7 +6,9 @@ import '../providers/anime_provider.dart';
 import '../providers/history_provider.dart';
 import '../models/anime_media.dart';
 import 'details_screen.dart';
+import 'downloads_screen.dart';
 import 'search_screen.dart';
+import 'terminal_screen.dart';
 import 'video_player_screen.dart';
 import 'package:shimmer/shimmer.dart';
 import '../providers/auth_provider.dart';
@@ -30,6 +32,18 @@ class HomeScreen extends ConsumerWidget {
             icon: const Icon(Icons.search),
             onPressed: () {
               Navigator.push(context, MaterialPageRoute(builder: (c) => const SearchScreen()));
+            },
+          ),
+          IconButton(
+            icon: const Icon(Icons.download_rounded),
+            onPressed: () {
+              Navigator.push(context, MaterialPageRoute(builder: (c) => const DownloadsScreen()));
+            },
+          ),
+          IconButton(
+            icon: const Icon(Icons.terminal),
+            onPressed: () {
+              Navigator.push(context, MaterialPageRoute(builder: (c) => const TerminalScreen()));
             },
           ),
           IconButton(

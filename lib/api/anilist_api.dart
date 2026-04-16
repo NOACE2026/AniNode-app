@@ -74,4 +74,24 @@ class AniListApi {
       return [];
     }
   }
+
+  Future<int?> getMalId(int anilistId) async {
+    const String gqlQuery = r'''
+      query ($id: Int) {
+        Media(id: $id, type: ANIME) {
+          idMal
+        }
+      }
+    ''';
+
+    try {
+      final response = await _dio.post(apiUrl, data: {
+        "query": gqlQuery,
+        "variables": {"id": anilistId}
+      });
+      return response.data['data']['Media']['idMal'];
+    } catch (e) {
+      return null;
+    }
+  }
 }

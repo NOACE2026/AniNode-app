@@ -6,7 +6,11 @@ import 'package:media_kit/media_kit.dart';
 import 'package:media_kit_video/media_kit_video.dart';
 import 'package:flutter/services.dart';
 import '../api/scraper_api.dart';
+import '../api/skip_api.dart';
+import '../api/anilist_api.dart';
 import '../providers/history_provider.dart';
+import '../providers/download_provider.dart';
+import '../models/download_item.dart';
 
 class VideoPlayerScreen extends ConsumerStatefulWidget {
   final int animeId;
@@ -26,7 +30,10 @@ class VideoPlayerScreen extends ConsumerStatefulWidget {
     required this.title,
     this.imageUrl,
     required this.mode,
+    this.localPath,
   });
+
+  final String? localPath;
 
   @override
   ConsumerState<VideoPlayerScreen> createState() => _VideoPlayerScreenState();
@@ -43,10 +50,16 @@ class _VideoPlayerScreenState extends ConsumerState<VideoPlayerScreen> {
   Timer? _autoplayTimer;
   Timer? _progressSaveTimer;
   bool _hasInitialSeeked = false;
+  bool _isChangingEpisode = false;
 
   // Track last known good position as fallback for dispose
   Duration _lastKnownPosition = Duration.zero;
   Duration _lastKnownDuration = Duration.zero;
+
+  // Skip intro/outro state
+  List<Map<String, dynamic>> _skipTimes = [];
+  final ValueNotifier<Map<String, dynamic>?> _activeSkipMarker = ValueNotifier(null);
+  bool _hasFetchedSkipTimes = false;
 
   // Cache history notifier to safely use in dispose()
   late HistoryNotifier _historyNotifier;
@@ -90,11 +103,13 @@ class _VideoPlayerScreenState extends ConsumerState<VideoPlayerScreen> {
     _player.stream.position.listen((pos) {
       if (pos > Duration.zero) {
         _lastKnownPosition = pos;
+        _checkSkipMarkers(pos);
       }
     });
     _player.stream.duration.listen((dur) {
       if (dur > Duration.zero) {
         _lastKnownDuration = dur;
+        _fetchSkipTimesOnce(dur);
       }
     });
 
@@ -107,6 +122,49 @@ class _VideoPlayerScreenState extends ConsumerState<VideoPlayerScreen> {
 
     _initializePlayer();
     _startProgressTimer();
+  }
+
+  void _checkSkipMarkers(Duration position) {
+    if (_skipTimes.isEmpty) return;
+    
+    final currentSeconds = position.inSeconds;
+    Map<String, dynamic>? active;
+    
+    for (var marker in _skipTimes) {
+      if (currentSeconds >= marker['start'] && currentSeconds <= marker['end']) {
+        active = marker;
+        break;
+      }
+    }
+    
+    if (_activeSkipMarker.value != active) {
+      _activeSkipMarker.value = active;
+    }
+  }
+
+  Future<void> _fetchSkipTimesOnce(Duration duration) async {
+    if (_hasFetchedSkipTimes || _isChangingEpisode) return;
+    _hasFetchedSkipTimes = true;
+
+    try {
+      final malId = await AniListApi().getMalId(widget.animeId);
+      if (malId != null) {
+        final episodeNumber = widget.episodes[_currentIndex];
+        final times = await SkipApi().getSkipTimes(
+          malId, 
+          episodeNumber, 
+          duration.inSeconds.toDouble(),
+        );
+        
+        if (mounted && times.isNotEmpty) {
+          setState(() { _skipTimes = times; });
+          debugPrint('AniNode: Loaded ${times.length} skip markers for MAL ID: $malId');
+          _checkSkipMarkers(_player.state.position);
+        }
+      }
+    } catch (e) {
+      debugPrint('AniNode: Error fetching skip times: $e');
+    }
   }
 
   void _startProgressTimer() {
@@ -140,6 +198,8 @@ class _VideoPlayerScreenState extends ConsumerState<VideoPlayerScreen> {
   }
 
   Future<void> _saveCurrentProgress() async {
+    if (_isChangingEpisode) return; // Prevent saving during transition
+    
     final currentPos = _player.state.position > Duration.zero 
         ? _player.state.position 
         : _lastKnownPosition;
@@ -188,17 +248,23 @@ class _VideoPlayerScreenState extends ConsumerState<VideoPlayerScreen> {
 
       if (mounted) {
         setState(() {
+          _isChangingEpisode = true;
           _currentIndex++;
           _isLoading = true;
           _errorMessage = null;
           _hasInitialSeeked = false;
           _autoplayNotifier.value = 0;
+          _skipTimes = []; // Reset skip times
+          _activeSkipMarker.value = null;
+          _hasFetchedSkipTimes = false; // Reset fetch flag
           // RESET last known values for the new episode
           _lastKnownPosition = Duration.zero;
           _lastKnownDuration = Duration.zero;
         });
       }
       _autoplayTimer?.cancel();
+      // Ensure player is stopped/reset before opening new media
+      await _player.pause();
       _initializePlayer();
     }
   }
@@ -219,6 +285,32 @@ class _VideoPlayerScreenState extends ConsumerState<VideoPlayerScreen> {
     try {
       if (!mounted) return;
       final episodeNumber = widget.episodes[_currentIndex];
+      
+      // Check for local file first
+      String? activePath = widget.localPath;
+      if (activePath == null) {
+        final downloads = ref.read(downloadProvider);
+        final downloadId = "${widget.showId}_$episodeNumber";
+        final item = downloads[downloadId];
+        if (item != null && item.status == DownloadStatus.completed && item.filePath != null) {
+          if (await File(item.filePath!).exists()) {
+            activePath = item.filePath;
+          }
+        }
+      }
+
+      if (activePath != null) {
+        debugPrint("AniNode: Playing local file: $activePath");
+        await _player.open(Media(activePath));
+        if (mounted) {
+          setState(() {
+            _isLoading = false;
+            _isChangingEpisode = false;
+          });
+        }
+        return;
+      }
+
       final sources = await ScraperApi().getSources(widget.showId, episodeNumber, mode: widget.mode);
 
       if (sources.isEmpty) {
@@ -231,38 +323,52 @@ class _VideoPlayerScreenState extends ConsumerState<VideoPlayerScreen> {
         return;
       }
 
-      String? matchedUrl;
-      for (var source in sources) {
+      int sourceIndex = 0;
+      bool success = false;
+
+      while (sourceIndex < sources.length && !success) {
+        final source = sources[sourceIndex];
         final currentUrl = await ScraperApi().resolveSource(source['url']!);
+        
         if (currentUrl != null) {
-          matchedUrl = currentUrl;
-          break;
+          try {
+            if (!mounted) return;
+            await _player.open(
+              Media(
+                currentUrl,
+                httpHeaders: {
+                  'Referer': ScraperApi.referer,
+                  'Origin': ScraperApi.referer,
+                  'User-Agent': ScraperApi.userAgent,
+                },
+              ),
+              play: true,
+            );
+            success = true;
+          } catch (e) {
+            sourceIndex++;
+            continue;
+          }
+        } else {
+          sourceIndex++;
         }
       }
 
-      if (matchedUrl == null) {
+      if (!success) {
         if (mounted) {
           setState(() {
             _isLoading = false;
-            _errorMessage = "Could not resolve sources.";
+            _errorMessage = "Could not play any available sources.";
           });
         }
         return;
       }
 
-      if (!mounted) return;
-      await _player.open(
-        Media(
-          matchedUrl,
-          httpHeaders: {
-            'Referer': ScraperApi.referer,
-            'User-Agent': ScraperApi.userAgent,
-          },
-        ),
-      );
-
       if (mounted) {
-        setState(() { _isLoading = false; });
+        setState(() { 
+          _isLoading = false; 
+          _isChangingEpisode = false;
+        });
       }
     } catch (e) {
       if (mounted) {
@@ -465,6 +571,36 @@ class _VideoPlayerScreenState extends ConsumerState<VideoPlayerScreen> {
                         ),
                       ],
                     ),
+                  ),
+                );
+              },
+            ),
+            // Skip Intro/Outro Button
+            ValueListenableBuilder<Map<String, dynamic>?>(
+              valueListenable: _activeSkipMarker,
+              builder: (context, marker, _) {
+                if (marker == null) return const SizedBox.shrink();
+                
+                String label = "Skip Intro";
+                if (marker['type'] == 'ed') label = "Skip Outro";
+                if (marker['type'] == 'recap') label = "Skip Recap";
+                
+                return Positioned(
+                  bottom: 100,
+                  right: 30,
+                  child: ElevatedButton.icon(
+                    onPressed: () {
+                      _player.seek(Duration(seconds: (marker['end'] as double).toInt()));
+                      _activeSkipMarker.value = null;
+                    },
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: Colors.white,
+                      foregroundColor: Colors.black,
+                      padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                    ),
+                    icon: const Icon(Icons.skip_next),
+                    label: Text(label, style: const TextStyle(fontWeight: FontWeight.bold)),
                   ),
                 );
               },
