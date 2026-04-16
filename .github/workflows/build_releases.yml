@@ -1,0 +1,74 @@
+name: Build Releases
+
+on:
+  push:
+    branches:
+      - main
+      - feature/**
+  workflow_dispatch:
+
+jobs:
+  build-linux:
+    name: Build Linux Release
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: 'stable'
+
+      - name: Install System Dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libgtk-3-dev liblzma-dev libmpv-dev pkg-config cmake ninja-build
+
+      - name: Install Flutter Dependencies
+        run: flutter pub get
+
+      - name: Build and Package Linux
+        run: |
+          dart pub global activate flutter_distributor
+          flutter build linux --release
+          flutter_distributor release --name dev --jobs release-linux
+
+      - name: Upload Linux DEB
+        uses: actions/upload-artifact@v4
+        with:
+          name: aninode-linux-deb
+          path: dist/*/*.deb
+
+      - name: Upload Linux AppImage
+        uses: actions/upload-artifact@v4
+        with:
+          name: aninode-linux-appimage
+          path: dist/*/*.AppImage
+
+  build-windows:
+    name: Build Windows Release
+    runs-on: windows-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: 'stable'
+
+      - name: Install Flutter Dependencies
+        run: flutter pub get
+
+      - name: Build Windows
+        run: flutter build windows --release
+
+      - name: Create MSIX Installer
+        run: dart run msix:create
+
+      - name: Upload Windows MSIX
+        uses: actions/upload-artifact@v4
+        with:
+          name: aninode-windows-msix
+          path: build/windows/x64/runner/Release/*.msix
