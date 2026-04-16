@@ -31,7 +31,12 @@ jobs:
       - name: Build and Package Linux
         run: |
           dart pub global activate flutter_distributor
+<<<<<<< HEAD
           dart pub global run flutter_distributor:release --name dev --jobs release-linux-deb,release-linux-appimage --verbose
+=======
+          flutter build linux --release
+          flutter_distributor release --name dev --jobs release-linux
+>>>>>>> 3af4716c250a45d1c1bfe2a096093afb9e46ed23
 
       - name: Upload Linux DEB
         uses: actions/upload-artifact@v4
@@ -60,15 +65,24 @@ jobs:
       - name: Install Flutter Dependencies
         run: flutter pub get
 
+<<<<<<< HEAD
       - name: Build and Package Windows
         run: |
           dart pub global activate flutter_distributor
           dart pub global run flutter_distributor:release --name dev --jobs release-windows-msix --verbose
+=======
+      - name: Build Windows
+        run: flutter build windows --release
+
+      - name: Create MSIX Installer
+        run: dart run msix:create
+>>>>>>> 3af4716c250a45d1c1bfe2a096093afb9e46ed23
 
       - name: Upload Windows MSIX
         uses: actions/upload-artifact@v4
         with:
           name: aninode-windows-msix
+<<<<<<< HEAD
           path: dist/*/*.msix
 
   build-ios:
@@ -96,3 +110,6 @@ jobs:
         with:
           name: aninode-ios-ipa
           path: dist/*/*.ipa
+=======
+          path: build/windows/x64/runner/Release/*.msix
+>>>>>>> 3af4716c250a45d1c1bfe2a096093afb9e46ed23
