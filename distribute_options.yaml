@@ -1,51 +1,29 @@
-<<<<<<< HEAD
 output: dist
 releases:
   - name: dev
     jobs:
-      - name: release-linux-deb
+      - name: linux-deb
         package:
           platform: linux
           target: deb
         build_args:
-          - --release
-      - name: release-linux-appimage
+          release: true
+      - name: linux-appimage
         package:
           platform: linux
           target: appimage
         build_args:
-          - --release
-      - name: release-windows-msix
+          release: true
+      - name: windows-msix
         package:
           platform: windows
           target: msix
         build_args:
-          - --release
-      - name: release-ios-ipa
+          release: true
+      - name: ios-ipa
         package:
           platform: ios
           target: ipa
         build_args:
-          - --release
-          - --no-codesign
-=======
-output: dist/
-releases:
-  - name: dev
-    jobs:
-      - name: release-linux
-        package:
-          platform: linux
-          targets:
-            - deb
-            - appimage
-        artifacts:
-          - build/linux/x64/release/bundle/**
-      - name: release-windows
-        package:
-          platform: windows
-          targets:
-            - msix
-        artifacts:
-          - build/windows/x64/runner/Release/**
->>>>>>> 3af4716c250a45d1c1bfe2a096093afb9e46ed23
+          release: true
+          no-codesign: true
