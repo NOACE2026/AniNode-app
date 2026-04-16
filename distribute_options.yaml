@@ -1,19 +1,29 @@
-output: dist/
+output: dist
 releases:
   - name: dev
     jobs:
-      - name: release-linux
+      - name: release-linux-deb
         package:
           platform: linux
-          targets:
-            - deb
-            - appimage
-        artifacts:
-          - build/linux/x64/release/bundle/**
-      - name: release-windows
+          target: deb
+        build_args:
+          - --release
+      - name: release-linux-appimage
+        package:
+          platform: linux
+          target: appimage
+        build_args:
+          - --release
+      - name: release-windows-msix
         package:
           platform: windows
-          targets:
-            - msix
-        artifacts:
-          - build/windows/x64/runner/Release/**
+          target: msix
+        build_args:
+          - --release
+      - name: release-ios-ipa
+        package:
+          platform: ios
+          target: ipa
+        build_args:
+          - --release
+          - --no-codesign

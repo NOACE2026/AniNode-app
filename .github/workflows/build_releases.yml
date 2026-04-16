@@ -31,8 +31,7 @@ jobs:
       - name: Build and Package Linux
         run: |
           dart pub global activate flutter_distributor
-          flutter build linux --release
-          flutter_distributor release --name dev --jobs release-linux
+          dart pub global run flutter_distributor:release --name dev --jobs release-linux-deb,release-linux-appimage --verbose
 
       - name: Upload Linux DEB
         uses: actions/upload-artifact@v4
@@ -61,14 +60,39 @@ jobs:
       - name: Install Flutter Dependencies
         run: flutter pub get
 
-      - name: Build Windows
-        run: flutter build windows --release
-
-      - name: Create MSIX Installer
-        run: dart run msix:create
+      - name: Build and Package Windows
+        run: |
+          dart pub global activate flutter_distributor
+          dart pub global run flutter_distributor:release --name dev --jobs release-windows-msix --verbose
 
       - name: Upload Windows MSIX
         uses: actions/upload-artifact@v4
         with:
           name: aninode-windows-msix
-          path: build/windows/x64/runner/Release/*.msix
+          path: dist/*/*.msix
+
+  build-ios:
+    name: Build iOS Release
+    runs-on: macos-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: 'stable'
+
+      - name: Install Flutter Dependencies
+        run: flutter pub get
+
+      - name: Build and Package iOS
+        run: |
+          dart pub global activate flutter_distributor
+          dart pub global run flutter_distributor:release --name dev --jobs release-ios-ipa --verbose
+
+      - name: Upload iOS IPA
+        uses: actions/upload-artifact@v4
+        with:
+          name: aninode-ios-ipa
+          path: dist/*/*.ipa
