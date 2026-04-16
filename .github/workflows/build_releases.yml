@@ -31,7 +31,7 @@ jobs:
       - name: Build and Package Linux
         run: |
           dart pub global activate flutter_distributor
-          dart pub global run flutter_distributor:release --name dev --jobs linux-deb,linux-appimage --verbose
+          dart pub global run flutter_distributor release --name dev --jobs linux-deb,linux-appimage --verbose
 
       - name: Upload Linux DEB
         uses: actions/upload-artifact@v4
@@ -63,7 +63,7 @@ jobs:
       - name: Build and Package Windows
         run: |
           dart pub global activate flutter_distributor
-          dart pub global run flutter_distributor:release --name dev --jobs windows-msix --verbose
+          dart pub global run flutter_distributor release --name dev --jobs windows-msix --verbose
 
       - name: Upload Windows MSIX
         uses: actions/upload-artifact@v4
@@ -89,7 +89,7 @@ jobs:
       - name: Build and Package iOS
         run: |
           dart pub global activate flutter_distributor
-          dart pub global run flutter_distributor:release --name dev --jobs ios-ipa --verbose
+          dart pub global run flutter_distributor release --name dev --jobs ios-ipa --verbose
 
       - name: Upload iOS IPA
         uses: actions/upload-artifact@v4
