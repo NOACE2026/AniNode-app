@@ -1,0 +1,19 @@
+output: dist/
+releases:
+  - name: dev
+    jobs:
+      - name: release-linux
+        package:
+          platform: linux
+          targets:
+            - deb
+            - appimage
+        artifacts:
+          - build/linux/x64/release/bundle/**
+      - name: release-windows
+        package:
+          platform: windows
+          targets:
+            - msix
+        artifacts:
+          - build/windows/x64/runner/Release/**

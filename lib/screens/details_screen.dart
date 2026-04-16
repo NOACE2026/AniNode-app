@@ -1,11 +1,12 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:flutter_riverpod/legacy.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import '../models/anime_media.dart';
 import '../api/scraper_api.dart';
 import '../providers/history_provider.dart';
 import '../providers/anime_provider.dart';
+import '../providers/download_provider.dart';
+import '../models/download_item.dart';
 import 'video_player_screen.dart';
 
 class DetailsScreen extends ConsumerWidget {
@@ -124,7 +125,25 @@ class DetailsScreen extends ConsumerWidget {
                                     child: Text(epNum, style: const TextStyle(fontWeight: FontWeight.bold)),
                                   ),
                                   title: Text('Episode $epNum'),
-                                  trailing: const Icon(Icons.play_circle_fill, color: Colors.white54),
+                                  trailing: SizedBox(
+                                    width: 100,
+                                    child: Row(
+                                      mainAxisAlignment: MainAxisAlignment.end,
+                                      children: [
+                                        _DownloadButton(
+                                          animeId: anime.id,
+                                          showId: id,
+                                          title: anime.title,
+                                          episode: epNum,
+                                          bannerUrl: anime.coverUrl,
+                                          scraper: ScraperApi(),
+                                          mode: mode,
+                                        ),
+                                        const SizedBox(width: 8),
+                                        const Icon(Icons.play_circle_fill, color: Colors.white54),
+                                      ],
+                                    ),
+                                  ),
                                   onTap: () {
                                     Navigator.push(
                                       context,
@@ -176,5 +195,93 @@ class DetailsScreen extends ConsumerWidget {
         ],
       ),
     );
+  }
+}
+
+class _DownloadButton extends ConsumerWidget {
+  final int animeId;
+  final String showId;
+  final String title;
+  final String episode;
+  final String? bannerUrl;
+  final ScraperApi scraper;
+  final String mode;
+
+  const _DownloadButton({
+    required this.animeId,
+    required this.showId,
+    required this.title,
+    required this.episode,
+    this.bannerUrl,
+    required this.scraper,
+    required this.mode,
+  });
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final downloads = ref.watch(downloadProvider);
+    final id = "${showId}_$episode";
+    final item = downloads[id];
+
+    if (item == null) {
+      return IconButton(
+        icon: const Icon(Icons.download_for_offline_outlined, size: 20),
+        onPressed: () async {
+          // Find source URL before starting download
+          try {
+            final sources = await scraper.getSources(showId, episode, mode: mode);
+            if (sources.isNotEmpty) {
+              final bestSource = sources.first['url'];
+              if (bestSource != null) {
+                ref.read(downloadProvider.notifier).startDownload(
+                  animeId: animeId,
+                  showId: showId,
+                  title: title,
+                  episode: episode,
+                  sourceUrl: bestSource,
+                  bannerUrl: bannerUrl,
+                );
+              }
+            }
+          } catch (e) {
+            ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("Error: $e")));
+          }
+        },
+      );
+    }
+
+    switch (item.status) {
+      case DownloadStatus.downloading:
+        return Stack(
+          alignment: Alignment.center,
+          children: [
+            SizedBox(
+              width: 24,
+              height: 24,
+              child: CircularProgressIndicator(
+                value: item.progress,
+                strokeWidth: 2,
+                backgroundColor: Colors.white10,
+              ),
+            ),
+            Text(
+              "${(item.progress * 100).toInt()}%",
+              style: const TextStyle(fontSize: 8, fontWeight: FontWeight.bold),
+            ),
+          ],
+        );
+      case DownloadStatus.completed:
+        return const Icon(Icons.check_circle, color: Colors.greenAccent, size: 20);
+      case DownloadStatus.failed:
+        return IconButton(
+          icon: const Icon(Icons.error_outline, color: Colors.redAccent, size: 20),
+          onPressed: () {
+             // Retry or remove? For now just remove and let user click download again
+             ref.read(downloadProvider.notifier).deleteDownload(id);
+          },
+        );
+      default:
+        return const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2));
+    }
   }
 }

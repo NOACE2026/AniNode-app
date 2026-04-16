@@ -4,7 +4,9 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:media_kit/media_kit.dart';
 import 'screens/home_screen.dart';
 import 'screens/login_screen.dart';
+import 'screens/downloads_screen.dart';
 import 'providers/auth_provider.dart';
+import 'providers/connectivity_provider.dart';
 
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
@@ -32,9 +34,18 @@ class MyApp extends ConsumerWidget {
         ),
         textTheme: GoogleFonts.outfitTextTheme(ThemeData.dark().textTheme),
       ),
-      home: authState.isLoggedIn 
-          ? const HomeScreen() 
-          : const LoginScreen(),
+      home: _buildInitialScreen(ref, authState),
     );
+  }
+
+  Widget _buildInitialScreen(WidgetRef ref, AuthState authState) {
+    if (!authState.isLoggedIn) return const LoginScreen();
+
+    final connectivity = ref.watch(connectivityProvider).value;
+    if (connectivity == ConnectivityStatus.offline) {
+      return const DownloadsScreen();
+    }
+    
+    return const HomeScreen();
   }
 }

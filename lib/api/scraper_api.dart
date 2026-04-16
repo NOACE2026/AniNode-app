@@ -1,14 +1,19 @@
+import 'dart:convert';
+import 'dart:typed_data';
 import 'package:dio/dio.dart';
+import 'package:crypto/crypto.dart';
+import 'package:encrypt/encrypt.dart' as enc;
 
 class ScraperApi {
   static const String baseUrl = 'https://allmanga.to';
   static const String apiUrl = 'https://api.allanime.day/api';
-  static const String referer = 'https://allmanga.to';
-  static const String userAgent = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36';
+  static const String referer = 'https://allmanga.to/';
+  static const String userAgent = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:109.0) Gecko/20100101 Firefox/121.0';
 
   final Dio _dio = Dio(BaseOptions(
     headers: {
       'Referer': referer,
+      'Origin': 'https://allmanga.to',
       'User-Agent': userAgent,
       'Content-Type': 'application/json',
     },
@@ -167,11 +172,66 @@ class ScraperApi {
     }
   }
 
+  String _decryptTobeparsed(String encrypted) {
+    try {
+      String clean = encrypted.trim();
+
+      // Check if it's a HEX string (even length, only 0-9a-f)
+      final hexRegex = RegExp(r'^[0-9a-fA-F]+$');
+      if (clean.length % 2 == 0 && hexRegex.hasMatch(clean)) {
+        List<int> bytes = [];
+        for (int i = 0; i < clean.length; i += 2) {
+          bytes.add(int.parse(clean.substring(i, i + 2), radix: 16));
+        }
+        final decrypted = bytes.map((b) => b ^ 56).toList();
+        return utf8.decode(decrypted);
+      } else {
+        // Base64 + AES-GCM Encryption
+        String normalized = clean.replaceAll('_', '/').replaceAll('-', '+');
+        while (normalized.length % 4 != 0) {
+          normalized += '=';
+        }
+        
+        final bytes = base64.decode(normalized);
+        if (bytes.length < 28) return ""; // Minimum length for IV + AuthTag
+
+        // Extract parts
+        final ivBytes = bytes.sublist(0, 12);
+        final ciphertextWithMac = bytes.sublist(12);
+
+        // Derive Key (SHA-256 of reversed password)
+        const reversedPassword = "SimtVuagFbGR2K7P";
+        final keyBytes = sha256.convert(utf8.encode(reversedPassword)).bytes;
+        
+        final key = enc.Key(Uint8List.fromList(keyBytes));
+        final iv = enc.IV(Uint8List.fromList(ivBytes));
+
+        // Decrypt using AES-GCM (no padding)
+        final encrypter = enc.Encrypter(enc.AES(key, mode: enc.AESMode.gcm, padding: null));
+        String decrypted = encrypter.decrypt(
+          enc.Encrypted(Uint8List.fromList(ciphertextWithMac)), 
+          iv: iv
+        );
+        
+        // Strip trailing garbage bytes (sometimes GCM tag is appended as plaintext)
+        int lastBrace = decrypted.lastIndexOf('}');
+        if (lastBrace != -1) {
+          decrypted = decrypted.substring(0, lastBrace + 1);
+        }
+
+        return decrypted;
+      }
+    } catch (e) {
+      print('Decryption error: $e');
+      return "";
+    }
+  }
+
   Future<List<Map<String, String>>> getSources(String showId, String epNumber, {String mode = 'sub'}) async {
     const String gqlQuery = r'''
       query ($showId: String!, $translationType: VaildTranslationTypeEnumType!, $episodeString: String!) { 
         episode( showId: $showId translationType: $translationType episodeString: $episodeString ) { 
-          episodeString sourceUrls 
+          episodeString sourceUrls __typename
         } 
       }
     ''';
@@ -186,7 +246,30 @@ class ScraperApi {
         },
       });
 
-      final List sources = response.data['data']['episode']['sourceUrls'] ?? [];
+      print('RAW RESPONSE: ${response.data}');
+
+      dynamic episodeData = response.data['data']['episode'];
+      dynamic tobeparsed = response.data['data']['tobeparsed'];
+      
+      List sources = [];
+
+      if (tobeparsed != null) {
+        final decrypted = _decryptTobeparsed(tobeparsed);
+        print('DECRYPTED: ${decrypted.substring(0, decrypted.length > 50 ? 50 : decrypted.length)}');
+        final decoded = json.decode(decrypted);
+        sources = decoded['episode']?['sourceUrls'] ?? [];
+      } else if (episodeData != null) {
+        if (episodeData['sourceUrls'] is String) {
+          final decrypted = _decryptTobeparsed(episodeData['sourceUrls']);
+          sources = json.decode(decrypted) as List;
+        } else {
+          sources = episodeData['sourceUrls'] ?? [];
+        }
+      }
+
+      print('Sources length: ${sources.length}');
+      if (sources.isEmpty) return [];
+
       List<Map<String, String>> resolvedSources = [];
 
       for (var s in sources) {
@@ -195,12 +278,12 @@ class ScraperApi {
           String encrypted = url.substring(2);
           String decrypted = decryptId(encrypted);
           resolvedSources.add({
-            "name": s['sourceName'],
+            "name": s['sourceName'] ?? "Default",
             "url": decrypted.startsWith('http') ? decrypted : "https://allanime.day$decrypted"
           });
         } else {
           resolvedSources.add({
-            "name": s['sourceName'],
+            "name": s['sourceName'] ?? "Default",
             "url": url
           });
         }
@@ -209,8 +292,8 @@ class ScraperApi {
       // Sort to prioritize "S-mp4" and "Yt-mp4" which are usually direct.
       final preferred = ['S-mp4', 'Yt-mp4', 'Luf-mp4'];
       resolvedSources.sort((a, b) {
-        int aLevel = preferred.indexWhere((p) => a['name']!.contains(p));
-        int bLevel = preferred.indexWhere((p) => b['name']!.contains(p));
+        int aLevel = preferred.indexWhere((p) => (a['name'] ?? "").contains(p));
+        int bLevel = preferred.indexWhere((p) => (b['name'] ?? "").contains(p));
         if (aLevel == -1) aLevel = 99;
         if (bLevel == -1) bLevel = 99;
         return aLevel.compareTo(bLevel);
