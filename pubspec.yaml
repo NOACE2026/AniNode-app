@@ -67,10 +67,19 @@ dev_dependencies:
 msix_config:
   display_name: AniNode
   publisher_display_name: AmbitDev
-  identity_name: com.aninode.mobile
+  identity_name: com.ambitdev.aninode
+  publisher: CN=AmbitDev
   logo_path: assets/images/launcher_icon.png
+  start_menu_icon_path: assets/images/launcher_icon.png
+  tile_icon_path: assets/images/launcher_icon.png
+  vs_generated_images_folder_path: assets/images/
+  icons_background_color: "#0F1117"
+  architecture: x64
   capabilities: internetClient, internetClientServer, privateNetworkClientServer
-  install_certificate: true # For self-signing during build
+  languages: en-us
+  install_certificate: false
+  output_name: AniNode-Setup
+  output_path: build\windows\msix
 
 flutter_launcher_icons:
   android: true
