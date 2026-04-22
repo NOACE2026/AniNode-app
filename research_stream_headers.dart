@@ -25,7 +25,7 @@ void main() async {
       url,
       options: Options(headers: {
         'User-Agent': ScraperApi.userAgent,
-        'Referer': ScraperApi.referer,
+        'Referer': ScraperApi.baseUrl,
       }),
     );
     print('Content-Type: ${response.headers.value('content-type')}');
@@ -39,7 +39,7 @@ void main() async {
         options: Options(
           headers: {
             'User-Agent': ScraperApi.userAgent,
-            'Referer': ScraperApi.referer,
+            'Referer': ScraperApi.baseUrl,
           },
           responseType: ResponseType.stream, // Don't download the whole thing
         ),

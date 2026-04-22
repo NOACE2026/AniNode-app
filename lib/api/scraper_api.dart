@@ -1,328 +1,285 @@
 import 'dart:convert';
-import 'dart:typed_data';
 import 'package:dio/dio.dart';
-import 'package:crypto/crypto.dart';
 import 'package:encrypt/encrypt.dart' as enc;
+import 'package:html/parser.dart' as parser;
 
 class ScraperApi {
-  static const String baseUrl = 'https://allmanga.to';
-  static const String apiUrl = 'https://api.allanime.day/api';
-  static const String referer = 'https://allmanga.to/';
+  static const String baseUrl = 'https://anitaku.to';
   static const String userAgent = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:109.0) Gecko/20100101 Firefox/121.0';
 
   final Dio _dio = Dio(BaseOptions(
     headers: {
-      'Referer': referer,
-      'Origin': 'https://allmanga.to',
       'User-Agent': userAgent,
-      'Content-Type': 'application/json',
     },
+    connectTimeout: const Duration(seconds: 15),
+    receiveTimeout: const Duration(seconds: 15),
   ));
 
-  static final Map<String, String> _decryptMap = {
-    "79": "A",
-    "7a": "B",
-    "7b": "C",
-    "7c": "D",
-    "7d": "E",
-    "7e": "F",
-    "7f": "G",
-    "70": "H",
-    "71": "I",
-    "72": "J",
-    "73": "K",
-    "74": "L",
-    "75": "M",
-    "76": "N",
-    "77": "O",
-    "68": "P",
-    "69": "Q",
-    "6a": "R",
-    "6b": "S",
-    "6c": "T",
-    "6d": "U",
-    "6e": "V",
-    "6f": "W",
-    "60": "X",
-    "61": "Y",
-    "62": "Z",
-    "59": "a",
-    "5a": "b",
-    "5b": "c",
-    "5c": "d",
-    "5d": "e",
-    "5e": "f",
-    "5f": "g",
-    "50": "h",
-    "51": "i",
-    "52": "j",
-    "53": "k",
-    "54": "l",
-    "55": "m",
-    "56": "n",
-    "57": "o",
-    "48": "p",
-    "49": "q",
-    "4a": "r",
-    "4b": "s",
-    "4c": "t",
-    "4d": "u",
-    "4e": "v",
-    "4f": "w",
-    "40": "x",
-    "41": "y",
-    "42": "z",
-    "08": "0",
-    "09": "1",
-    "0a": "2",
-    "0b": "3",
-    "0c": "4",
-    "0d": "5",
-    "0e": "6",
-    "0f": "7",
-    "00": "8",
-    "01": "9",
-    "15": "-",
-    "16": ".",
-    "67": "_",
-    "46": "~",
-    "02": ":",
-    "17": "/",
-    "07": "?",
-    "1b": "#",
-    "63": "[",
-    "65": "]",
-    "78": "@",
-    "19": "!",
-    "1c": r"$",
-    "1e": "&",
-    "10": "(",
-    "11": ")",
-    "12": "*",
-    "13": "+",
-    "14": ",",
-    "03": ";",
-    "05": "=",
-    "1d": "%",
+  // GogoCDN Keys (kept for fallback if some episodes still use old CDN)
+  final _keys = {
+    'key': '37911490979715163134003223491201',
+    'secondKey': '54674138327930866480207815084989',
+    'iv': '3134003223491201',
   };
 
-  String decryptId(String encrypted) {
-    String decrypted = "";
-    for (int i = 0; i < encrypted.length; i += 2) {
-      if (i + 2 > encrypted.length) break;
-      String hex = encrypted.substring(i, i + 2);
-      decrypted += _decryptMap[hex] ?? "?";
+  Future<List<Map<String, dynamic>>> search(String query, {String mode = 'sub'}) async {
+    try {
+      final response = await _dio.get('$baseUrl/search.html?keyword=${Uri.encodeComponent(query)}');
+      final document = parser.parse(response.data);
+      final List<Map<String, dynamic>> results = [];
+
+      final items = document.querySelectorAll('div.last_episodes > ul > li');
+      for (var item in items) {
+        final a = item.querySelector('p.name > a');
+        final img = item.querySelector('div.img > a > img');
+
+        final id = a?.attributes['href']?.split('/').last ?? '';
+        final title = a?.attributes['title'] ?? '';
+        final image = img?.attributes['src'] ?? '';
+
+        if (id.isEmpty) continue;
+
+        results.add({
+          "id": id,
+          "name": title,
+          "englishName": title,
+          "thumbnail": image,
+          "episodes": 0,
+        });
+      }
+      return results;
+    } catch (e) {
+      print('Search error: $e');
+      return [];
     }
-    return decrypted.replaceAll("/clock", "/clock.json");
   }
 
-  Future<List<Map<String, dynamic>>> search(String query, {String mode = 'sub'}) async {
-    const String gqlQuery = r'''
-      query( $search: SearchInput $limit: Int $page: Int $translationType: VaildTranslationTypeEnumType $countryOrigin: VaildCountryOriginEnumType ) { 
-        shows( search: $search limit: $limit page: $page translationType: $translationType countryOrigin: $countryOrigin ) { 
-          edges { _id name availableEpisodes __typename } 
-        } 
-      }
-    ''';
-
-    final variables = {
-      "search": {"allowAdult": false, "allowUnknown": false, "query": query},
-      "limit": 40,
-      "page": 1,
-      "translationType": mode,
-      "countryOrigin": "ALL"
-    };
-
+  Future<List<Map<String, dynamic>>> fetchTrending({String mode = 'sub'}) async {
     try {
-      final response = await _dio.post(apiUrl, data: {
-        "query": gqlQuery,
-        "variables": variables,
-      });
+      // Correct URL — recent releases are at the root, not /ajax
+      final response = await _dio.get('$baseUrl/page-recent-release.html?page=1&type=1');
+      final document = parser.parse(response.data);
+      final List<Map<String, dynamic>> results = [];
 
-      final List edges = response.data['data']['shows']['edges'];
-      return edges.map((edge) => {
-        "id": edge['_id'],
-        "name": edge['name'],
-        "episodes": edge['availableEpisodes'][mode] ?? 0,
-      }).toList();
+      final items = document.querySelectorAll('div.last_episodes > ul > li');
+      for (var item in items) {
+        final a = item.querySelector('p.name > a');
+        final img = item.querySelector('div.img > a > img');
+        final epText = item.querySelector('p.episode')?.text.trim() ?? '';
+
+        // Episode links are like /name-episode-1. ID is "name".
+        final href = a?.attributes['href'] ?? '';
+        final id = href.split('/').last.split('-episode-').first;
+        final title = a?.attributes['title'] ?? '';
+        final image = img?.attributes['src'] ?? '';
+
+        if (id.isEmpty) continue;
+
+        results.add({
+          "id": id,
+          "name": title,
+          "englishName": title,
+          "thumbnail": image,
+          "episodes": int.tryParse(epText.replaceAll(RegExp(r'[^0-9]'), '')) ?? 0,
+        });
+      }
+
+      // If recent release page fails or is empty, fall back to search page results
+      if (results.isEmpty) {
+        return await _fetchPopularFallback();
+      }
+
+      return results;
     } catch (e) {
+      print('Trending error: $e');
+      return await _fetchPopularFallback();
+    }
+  }
+
+  Future<List<Map<String, dynamic>>> _fetchPopularFallback() async {
+    try {
+      final response = await _dio.get('$baseUrl/popular.html');
+      final document = parser.parse(response.data);
+      final List<Map<String, dynamic>> results = [];
+
+      final items = document.querySelectorAll('div.last_episodes > ul > li');
+      for (var item in items) {
+        final a = item.querySelector('p.name > a');
+        final img = item.querySelector('div.img > a > img');
+        final id = a?.attributes['href']?.split('/').last ?? '';
+        final title = a?.attributes['title'] ?? '';
+        final image = img?.attributes['src'] ?? '';
+        if (id.isEmpty) continue;
+        results.add({
+          "id": id,
+          "name": title,
+          "englishName": title,
+          "thumbnail": image,
+          "episodes": 0,
+        });
+      }
+      return results;
+    } catch (e) {
+      print('Popular fallback error: $e');
       return [];
+    }
+  }
+
+  Future<Map<String, dynamic>?> getShowDetails(String showId) async {
+    try {
+      final url = showId.startsWith('http') ? showId : '$baseUrl/category/$showId';
+      final response = await _dio.get(url);
+      final document = parser.parse(response.data);
+
+      final title = document.querySelector('div.anime_info_body_bg > h1')?.text.trim() ?? '';
+      final image = document.querySelector('div.anime_info_body_bg > img')?.attributes['src'] ?? '';
+      final description = document.querySelector('div.anime_info_body_bg > p:nth-child(5)')?.text.replaceFirst('Plot Summary: ', '').trim() ?? '';
+      final status = document.querySelector('div.anime_info_body_bg > p:nth-child(8) > a')?.text.trim() ?? 'Unknown';
+      final type = document.querySelector('div.anime_info_body_bg > p:nth-child(4) > a')?.text.trim() ?? 'TV';
+
+      final genres = document.querySelectorAll('div.anime_info_body_bg > p:nth-child(6) > a')
+          .map((e) => e.text.trim())
+          .toList();
+
+      return {
+        "_id": showId,
+        "name": title,
+        "englishName": title,
+        "thumbnail": image,
+        "description": description,
+        "genres": genres,
+        "status": status,
+        "type": type,
+        "score": "N/A",
+      };
+    } catch (e) {
+      print('Details error: $e');
+      return null;
     }
   }
 
   Future<List<String>> getEpisodesList(String showId, {String mode = 'sub'}) async {
-    const String gqlQuery = r'''
-      query ($showId: String!) { 
-        show( _id: $showId ) { _id availableEpisodesDetail } 
-      }
-    ''';
-
     try {
-      final response = await _dio.post(apiUrl, data: {
-        "query": gqlQuery,
-        "variables": {"showId": showId},
-      });
+      final url = '$baseUrl/category/$showId';
+      final response = await _dio.get(url);
+      final document = parser.parse(response.data);
 
-      final List episodes = response.data['data']['show']['availableEpisodesDetail'][mode] ?? [];
-      List<String> sortedEps = episodes.map((e) => e.toString()).toList();
-      sortedEps.sort((a, b) => double.parse(a).compareTo(double.parse(b)));
-      return sortedEps;
+      final eps = document.querySelectorAll('a[href^="/$showId-episode-"]')
+          .map((e) => RegExp(r'\d+').firstMatch(e.text)?.group(0) ?? '')
+          .where((e) => e.isNotEmpty)
+          .toList();
+
+      // Convert to Set to remove duplicates, then sort numerically
+      final uniqueEps = eps.toSet().toList();
+      uniqueEps.sort((a, b) => double.parse(a).compareTo(double.parse(b)));
+      return uniqueEps;
     } catch (e) {
+      print('Episodes error: $e');
       return [];
-    }
-  }
-
-  String _decryptTobeparsed(String encrypted) {
-    try {
-      String clean = encrypted.trim();
-
-      // Check if it's a HEX string (even length, only 0-9a-f)
-      final hexRegex = RegExp(r'^[0-9a-fA-F]+$');
-      if (clean.length % 2 == 0 && hexRegex.hasMatch(clean)) {
-        List<int> bytes = [];
-        for (int i = 0; i < clean.length; i += 2) {
-          bytes.add(int.parse(clean.substring(i, i + 2), radix: 16));
-        }
-        final decrypted = bytes.map((b) => b ^ 56).toList();
-        return utf8.decode(decrypted);
-      } else {
-        // Base64 + AES-GCM Encryption
-        String normalized = clean.replaceAll('_', '/').replaceAll('-', '+');
-        while (normalized.length % 4 != 0) {
-          normalized += '=';
-        }
-        
-        final bytes = base64.decode(normalized);
-        if (bytes.length < 28) return ""; // Minimum length for IV + AuthTag
-
-        // Extract parts
-        final ivBytes = bytes.sublist(0, 12);
-        final ciphertextWithMac = bytes.sublist(12);
-
-        // Derive Key (SHA-256 of reversed password)
-        const reversedPassword = "SimtVuagFbGR2K7P";
-        final keyBytes = sha256.convert(utf8.encode(reversedPassword)).bytes;
-        
-        final key = enc.Key(Uint8List.fromList(keyBytes));
-        final iv = enc.IV(Uint8List.fromList(ivBytes));
-
-        // Decrypt using AES-GCM (no padding)
-        final encrypter = enc.Encrypter(enc.AES(key, mode: enc.AESMode.gcm, padding: null));
-        String decrypted = encrypter.decrypt(
-          enc.Encrypted(Uint8List.fromList(ciphertextWithMac)), 
-          iv: iv
-        );
-        
-        // Strip trailing garbage bytes (sometimes GCM tag is appended as plaintext)
-        int lastBrace = decrypted.lastIndexOf('}');
-        if (lastBrace != -1) {
-          decrypted = decrypted.substring(0, lastBrace + 1);
-        }
-
-        return decrypted;
-      }
-    } catch (e) {
-      print('Decryption error: $e');
-      return "";
     }
   }
 
   Future<List<Map<String, String>>> getSources(String showId, String epNumber, {String mode = 'sub'}) async {
-    const String gqlQuery = r'''
-      query ($showId: String!, $translationType: VaildTranslationTypeEnumType!, $episodeString: String!) { 
-        episode( showId: $showId translationType: $translationType episodeString: $episodeString ) { 
-          episodeString sourceUrls __typename
-        } 
-      }
-    ''';
-
     try {
-      final response = await _dio.post(apiUrl, data: {
-        "query": gqlQuery,
-        "variables": {
-          "showId": showId,
-          "translationType": mode,
-          "episodeString": epNumber
-        },
-      });
+      final epId = '$showId-episode-$epNumber';
+      final response = await _dio.get('$baseUrl/$epId');
+      final document = parser.parse(response.data);
 
-      print('RAW RESPONSE: ${response.data}');
+      final serverLinks = document.querySelectorAll('.server-video');
+      String? targetUrl;
 
-      dynamic episodeData = response.data['data']['episode'];
-      dynamic tobeparsed = response.data['data']['tobeparsed'];
-      
-      List sources = [];
-
-      if (tobeparsed != null) {
-        final decrypted = _decryptTobeparsed(tobeparsed);
-        print('DECRYPTED: ${decrypted.substring(0, decrypted.length > 50 ? 50 : decrypted.length)}');
-        final decoded = json.decode(decrypted);
-        sources = decoded['episode']?['sourceUrls'] ?? [];
-      } else if (episodeData != null) {
-        if (episodeData['sourceUrls'] is String) {
-          final decrypted = _decryptTobeparsed(episodeData['sourceUrls']);
-          sources = json.decode(decrypted) as List;
-        } else {
-          sources = episodeData['sourceUrls'] ?? [];
+      // Prefer vibeplayer.site as it exposes direct m3u8
+      for (var link in serverLinks) {
+        final videoUrl = link.attributes['data-video'];
+        if (videoUrl != null && videoUrl.contains('vibeplayer.site')) {
+          targetUrl = videoUrl;
+          break;
         }
       }
 
-      print('Sources length: ${sources.length}');
-      if (sources.isEmpty) return [];
-
-      List<Map<String, String>> resolvedSources = [];
-
-      for (var s in sources) {
-        String url = s['sourceUrl'];
-        if (url.startsWith('--')) {
-          String encrypted = url.substring(2);
-          String decrypted = decryptId(encrypted);
-          resolvedSources.add({
-            "name": s['sourceName'] ?? "Default",
-            "url": decrypted.startsWith('http') ? decrypted : "https://allanime.day$decrypted"
-          });
-        } else {
-          resolvedSources.add({
-            "name": s['sourceName'] ?? "Default",
-            "url": url
-          });
-        }
+      // Fallback to any first server
+      if (targetUrl == null && serverLinks.isNotEmpty) {
+        targetUrl = serverLinks.first.attributes['data-video'];
       }
 
-      // Sort to prioritize "S-mp4" and "Yt-mp4" which are usually direct.
-      final preferred = ['S-mp4', 'Yt-mp4', 'Luf-mp4'];
-      resolvedSources.sort((a, b) {
-        int aLevel = preferred.indexWhere((p) => (a['name'] ?? "").contains(p));
-        int bLevel = preferred.indexWhere((p) => (b['name'] ?? "").contains(p));
-        if (aLevel == -1) aLevel = 99;
-        if (bLevel == -1) bLevel = 99;
-        return aLevel.compareTo(bLevel);
-      });
+      if (targetUrl == null) return [];
 
-      return resolvedSources;
+      final fullIframeUrl = targetUrl.startsWith('http') ? targetUrl : 'https:$targetUrl';
+
+      if (fullIframeUrl.contains('vibeplayer.site')) {
+        final uri = Uri.parse(fullIframeUrl);
+        // Extract the video ID from path — filter out empty segments and "embed"
+        final id = uri.pathSegments.lastWhere(
+          (s) => s.isNotEmpty && s != 'embed',
+          orElse: () => '',
+        );
+        if (id.isEmpty) return [];
+        final masterUrl = 'https://vibeplayer.site/public/stream/$id/master.m3u8';
+        return [{'name': 'Auto (VibePlayer)', 'url': masterUrl}];
+      }
+
+      // Fallback to legacy GogoCDN decryption for other servers
+      final videoSources = await _extractGogoCDN(fullIframeUrl);
+      return videoSources.map((s) => {
+        "name": s['quality'] ?? "Default",
+        "url": s['url'] ?? ""
+      }).where((s) => s['url']!.isNotEmpty).toList();
     } catch (e) {
+      print('Sources error: $e');
       return [];
     }
   }
 
-  Future<String?> resolveSource(String url) async {
-    if (url.contains('mp4upload.com') || url.contains('doodstream.com')) {
-      // These are currently embeds we don't handle directly yet.
-      return null;
-    }
-
-    if (!url.contains('/clock.json')) return url;
-
+  Future<List<Map<String, String>>> _extractGogoCDN(String iframeUrl) async {
     try {
-      final response = await _dio.get(url);
-      final List links = response.data['links'] ?? [];
-      if (links.isNotEmpty) {
-        // Return the first valid link or src
-        return links.first['link'] ?? links.first['src'];
+      final uri = Uri.parse(iframeUrl);
+      final id = uri.queryParameters['id'];
+      if (id == null) return [];
+
+      final response = await _dio.get(iframeUrl);
+      final document = parser.parse(response.data);
+
+      final key = enc.Key.fromUtf8(_keys['key']!);
+      final iv = enc.IV.fromUtf8(_keys['iv']!);
+      final encrypter = enc.Encrypter(enc.AES(key, mode: enc.AESMode.cbc));
+
+      final encryptedId = encrypter.encrypt(id, iv: iv).base64;
+
+      final scriptValue = document.querySelector("script[data-name='episode']")?.attributes['data-value'];
+      if (scriptValue == null) return [];
+
+      final decryptedToken = encrypter.decrypt(enc.Encrypted.fromBase64(scriptValue), iv: iv);
+
+      final ajaxParams = 'id=$encryptedId&alias=$id&$decryptedToken';
+      final ajaxRes = await _dio.get(
+        '${uri.scheme}://${uri.host}/encrypt-ajax.php?$ajaxParams',
+        options: Options(headers: {'X-Requested-With': 'XMLHttpRequest'})
+      );
+
+      final secondKey = enc.Key.fromUtf8(_keys['secondKey']!);
+      final secondEncrypter = enc.Encrypter(enc.AES(secondKey, mode: enc.AESMode.cbc));
+
+      final encryptedData = ajaxRes.data['data'];
+      final decryptedData = secondEncrypter.decrypt(enc.Encrypted.fromBase64(encryptedData), iv: iv);
+      final decoded = json.decode(decryptedData);
+
+      final List<Map<String, String>> sources = [];
+      if (decoded['source'] != null) {
+        for (var s in decoded['source']) {
+          sources.add({"url": s['file'], "quality": "HLS (Auto)"});
+        }
       }
+      if (decoded['source_bk'] != null) {
+        for (var s in decoded['source_bk']) {
+          sources.add({"url": s['file'], "quality": "Backup"});
+        }
+      }
+      return sources;
     } catch (e) {
-      // Fallback to original URL if resolution fails
+      print('GogoCDN extraction error: $e');
+      return [];
     }
-    return url;
   }
+
+  Future<String?> resolveSource(String url) async => url;
 }

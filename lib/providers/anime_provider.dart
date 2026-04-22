@@ -1,7 +1,6 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_riverpod/legacy.dart'; // Required for StateProvider in Riverpod 3.0 Alpha
 import '../api/scraper_api.dart';
-import '../api/anilist_api.dart';
 import '../models/anime_media.dart';
 
 // --- Shared State Providers ---
@@ -16,9 +15,10 @@ final searchQueryProvider = StateProvider<String>((ref) => '');
 
 // Trending anime for home screen
 final trendingAnimeProvider = FutureProvider<List<AnimeMedia>>((ref) async {
-  final api = AniListApi();
-  final results = await api.fetchTrending();
-  return results.map((m) => AnimeMedia.fromAniList(m)).toList();
+  final mode = ref.watch(selectedModeProvider);
+  final api = ScraperApi();
+  final results = await api.fetchTrending(mode: mode);
+  return results.map((m) => AnimeMedia.fromAllAnime(m)).toList();
 });
 
 // Search results based on searchQueryProvider
@@ -26,9 +26,10 @@ final searchResultsProvider = FutureProvider<List<AnimeMedia>>((ref) async {
   final query = ref.watch(searchQueryProvider);
   if (query.isEmpty) return [];
   
-  final api = AniListApi();
-  final results = await api.searchAnime(query);
-  return results.map((m) => AnimeMedia.fromAniList(m)).toList();
+  final mode = ref.watch(selectedModeProvider);
+  final api = ScraperApi();
+  final results = await api.search(query, mode: mode);
+  return results.map((m) => AnimeMedia.fromAllAnime(m)).toList();
 });
 
 // --- Scraper API Providers ---

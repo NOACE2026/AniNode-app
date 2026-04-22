@@ -1,26 +1,34 @@
+
 import 'dart:convert';
 import 'dart:typed_data';
+import 'package:crypto/crypto.dart';
+import 'package:encrypt/encrypt.dart' as enc;
 
 void main() {
-  final tobeparsed = "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_";
-  
+  final tobeparsed = "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";
+
   try {
-    // 1. Decode Base64
-    // Base64 padding might be needed if truncated
-    String normalized = tobeparsed.replaceAll('_', '/').replaceAll('-', '+');
-    while (normalized.length % 4 != 0) {
-      normalized += '=';
+    final bytes = base64.decode(tobeparsed);
+    if (bytes.length < 28) {
+      print("Too short");
+      return;
     }
+
+    final ivBytes = bytes.sublist(0, 12);
+    final tagBytes = bytes.sublist(bytes.length - 16);
+    final ciphertextBytes = bytes.sublist(12, bytes.length - 16);
+
+    const secret = "opbbna"; // anbbpo reversed
+    final keyBytes = sha256.convert(utf8.encode(secret)).bytes;
+    final key = enc.Key(Uint8List.fromList(keyBytes));
+    final iv = enc.IV(Uint8List.fromList(ivBytes));
+
+    final encrypter = enc.Encrypter(enc.AES(key, mode: enc.AESMode.gcm, padding: null));
+    final encrypted = enc.Encrypted(Uint8List.fromList([...ciphertextBytes, ...tagBytes]));
     
-    final bytes = base64.decode(normalized);
-    
-    // 2. XOR with 56
-    final decrypted = bytes.map((b) => b ^ 56).toList();
-    
-    // 3. Convert to string
-    final result = String.fromCharCodes(decrypted);
-    print('DECRYPTED: $result');
+    final decrypted = encrypter.decryptBytes(encrypted, iv: iv);
+    print("DECRYPTED UTF8: ${utf8.decode(decrypted)}");
   } catch (e) {
-    print('ERROR: $e');
+    print("Error: $e");
   }
 }

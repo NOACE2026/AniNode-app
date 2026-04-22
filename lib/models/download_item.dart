@@ -2,7 +2,7 @@ enum DownloadStatus { queued, downloading, completed, failed }
 
 class DownloadItem {
   final String id; // showId_epNum
-  final int animeId;
+  final String animeId;
   final String showId;
   final String title;
   final String episode;
@@ -59,8 +59,8 @@ class DownloadItem {
 
   factory DownloadItem.fromJson(Map<String, dynamic> json) => DownloadItem(
     id: json['id'],
-    animeId: json['animeId'],
-    showId: json['showId'],
+    animeId: json['animeId']?.toString() ?? '',
+    showId: json['showId']?.toString() ?? '',
     title: json['title'],
     episode: json['episode'],
     bannerUrl: json['bannerUrl'],

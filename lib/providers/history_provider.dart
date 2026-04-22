@@ -4,7 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 class WatchProgress {
-  final int animeId; // AniList ID
+  final String animeId; // Previously AniList ID, now Scraper ID or stringified int
   final String showId; // Scraper ID
   final String episode;
   final String title;
@@ -40,12 +40,12 @@ class WatchProgress {
 
   factory WatchProgress.fromJson(Map<String, dynamic> json) {
     return WatchProgress(
-      animeId: json['animeId'] is int ? json['animeId'] : int.tryParse(json['animeId']?.toString() ?? '') ?? 0,
+      animeId: json['animeId']?.toString() ?? '',
       showId: json['showId']?.toString() ?? '',
       episode: json['episode']?.toString() ?? '',
       title: json['title']?.toString() ?? 'Unknown',
       imageUrl: json['imageUrl']?.toString(),
-      mode: json['mode']?.toString() ?? 'sub', // Default to sub if missing
+      mode: json['mode']?.toString() ?? 'sub', 
       position: json['position'] is int ? json['position'] : int.tryParse(json['position']?.toString() ?? '') ?? 0,
       duration: json['duration'] is int ? json['duration'] : int.tryParse(json['duration']?.toString() ?? '') ?? 0,
       updatedAt: DateTime.tryParse(json['updatedAt']?.toString() ?? '') ?? DateTime.now(),
@@ -80,7 +80,7 @@ class HistoryNotifier extends AsyncNotifier<Map<String, WatchProgress>> {
   }
 
   Future<void> saveProgress({
-    required int animeId,
+    required String animeId,
     required String showId,
     required String episode,
     required String title,
@@ -143,7 +143,7 @@ final recentHistoryProvider = Provider<List<WatchProgress>>((ref) {
   final historyMap = ref.watch(historyProvider).value ?? {};
   
   // Group by animeId and keep the most recent entry for each
-  final Map<int, WatchProgress> uniqueHistory = {};
+  final Map<String, WatchProgress> uniqueHistory = {};
   for (final progress in historyMap.values) {
     final existing = uniqueHistory[progress.animeId];
     if (existing == null || progress.updatedAt.isAfter(existing.updatedAt)) {

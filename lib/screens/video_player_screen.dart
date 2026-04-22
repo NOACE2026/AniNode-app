@@ -13,7 +13,7 @@ import '../providers/download_provider.dart';
 import '../models/download_item.dart';
 
 class VideoPlayerScreen extends ConsumerStatefulWidget {
-  final int animeId;
+  final String animeId;
   final String showId;
   final List<String> episodes;
   final int initialIndex;
@@ -147,19 +147,22 @@ class _VideoPlayerScreenState extends ConsumerState<VideoPlayerScreen> {
     _hasFetchedSkipTimes = true;
 
     try {
-      final malId = await AniListApi().getMalId(widget.animeId);
-      if (malId != null) {
-        final episodeNumber = widget.episodes[_currentIndex];
-        final times = await SkipApi().getSkipTimes(
-          malId, 
-          episodeNumber, 
-          duration.inSeconds.toDouble(),
-        );
-        
-        if (mounted && times.isNotEmpty) {
-          setState(() { _skipTimes = times; });
-          debugPrint('AniNode: Loaded ${times.length} skip markers for MAL ID: $malId');
-          _checkSkipMarkers(_player.state.position);
+      final anilistIdInt = int.tryParse(widget.animeId);
+      if (anilistIdInt != null) {
+        final malId = await AniListApi().getMalId(anilistIdInt);
+        if (malId != null) {
+          final episodeNumber = widget.episodes[_currentIndex];
+          final times = await SkipApi().getSkipTimes(
+            malId, 
+            episodeNumber, 
+            duration.inSeconds.toDouble(),
+          );
+          
+          if (mounted && times.isNotEmpty) {
+            setState(() { _skipTimes = times; });
+            debugPrint('AniNode: Loaded ${times.length} skip markers for MAL ID: $malId');
+            _checkSkipMarkers(_player.state.position);
+          }
         }
       }
     } catch (e) {
@@ -337,8 +340,8 @@ class _VideoPlayerScreenState extends ConsumerState<VideoPlayerScreen> {
               Media(
                 currentUrl,
                 httpHeaders: {
-                  'Referer': ScraperApi.referer,
-                  'Origin': ScraperApi.referer,
+                  'Referer': ScraperApi.baseUrl,
+                  'Origin': ScraperApi.baseUrl,
                   'User-Agent': ScraperApi.userAgent,
                 },
               ),

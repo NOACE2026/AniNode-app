@@ -324,7 +324,7 @@ class _TrendingHeroSliderState extends State<_TrendingHeroSlider> {
     super.initState();
     _pageController = PageController();
     _timer = Timer.periodic(const Duration(seconds: 6), (timer) {
-      if (_pageController.hasClients) {
+      if (_pageController.hasClients && widget.animeList.isNotEmpty) {
         final nextIndex = (_currentIndex + 1) % widget.animeList.length;
         _pageController.animateToPage(
           nextIndex,

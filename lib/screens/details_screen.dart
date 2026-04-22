@@ -16,7 +16,12 @@ class DetailsScreen extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final mode = ref.watch(selectedModeProvider);
-    final showIdAsync = ref.watch(scraperIdProvider((title: anime.title, englishTitle: anime.englishTitle, mode: mode)));
+    // If the ID is an Anitaku slug (contains hyphens, not a pure number), use it directly.
+    // Otherwise fall back to a search to resolve the correct ID.
+    final isAnitakuSlug = anime.id.contains('-') || !RegExp(r'^\d+$').hasMatch(anime.id);
+    final showIdAsync = isAnitakuSlug
+        ? AsyncValue.data(anime.id)
+        : ref.watch(scraperIdProvider((title: anime.title, englishTitle: anime.englishTitle, mode: mode)));
     final historyAsync = ref.watch(historyProvider);
 
     return Scaffold(
@@ -199,7 +204,7 @@ class DetailsScreen extends ConsumerWidget {
 }
 
 class _DownloadButton extends ConsumerWidget {
-  final int animeId;
+  final String animeId;
   final String showId;
   final String title;
   final String episode;

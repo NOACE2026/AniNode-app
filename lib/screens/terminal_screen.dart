@@ -185,7 +185,7 @@ class _TerminalScreenState extends ConsumerState<TerminalScreen> {
             context,
             MaterialPageRoute(
               builder: (c) => VideoPlayerScreen(
-                animeId: 0, // Not tied to AniList in CLI mode natively
+                animeId: '0', // Not tied to AniList in CLI mode natively
                 showId: showId,
                 episodes: allEps,
                 initialIndex: epIndex,
@@ -236,7 +236,7 @@ class _TerminalScreenState extends ConsumerState<TerminalScreen> {
           _printLog("Check 'Downloads' screen for progress.", color: Colors.white70);
 
           ref.read(downloadProvider.notifier).startDownload(
-            animeId: 0, // CLI mode specific
+            animeId: '0', // CLI mode specific
             showId: showId,
             title: showName,
             episode: epNumber,

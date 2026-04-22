@@ -56,7 +56,7 @@ class DownloadNotifier extends Notifier<Map<String, DownloadItem>> {
   }
 
   Future<void> startDownload({
-    required int animeId,
+    required String animeId,
     required String showId,
     required String title,
     required String episode,
