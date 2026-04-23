@@ -13,9 +13,10 @@ class DownloadsScreen extends ConsumerWidget {
     final downloads = ref.watch(downloadProvider).values.where((e) => e.status == DownloadStatus.completed).toList();
 
     return Scaffold(
+      backgroundColor: const Color(0xFF0A0C12),
       appBar: AppBar(
         title: const Text('Offline Downloads'),
-        backgroundColor: Colors.transparent,
+        backgroundColor: const Color(0xFF1E2130),
         elevation: 0,
       ),
       body: downloads.isEmpty
@@ -48,9 +49,12 @@ class _DownloadTile extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     return Card(
-      color: Colors.white.withOpacity(0.05),
+      color: const Color(0xFF1E2130),
       margin: const EdgeInsets.only(bottom: 12),
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(12),
+        side: BorderSide(color: Colors.white.withOpacity(0.05)),
+      ),
       child: ListTile(
         contentPadding: const EdgeInsets.all(8),
         leading: ClipRRect(
@@ -67,7 +71,7 @@ class _DownloadTile extends ConsumerWidget {
         title: Text(item.title, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
         subtitle: Text('Episode ${item.episode}', style: const TextStyle(color: Colors.white54, fontSize: 12)),
         trailing: IconButton(
-          icon: const Icon(Icons.delete_outline, color: Colors.redAccent),
+          icon: const Icon(Icons.delete_outline, color: Color(0xFFE53935)),
           onPressed: () {
             ref.read(downloadProvider.notifier).deleteDownload(item.id);
           },

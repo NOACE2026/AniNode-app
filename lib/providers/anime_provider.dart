@@ -8,8 +8,11 @@ import '../models/anime_media.dart';
 // Provides the selection of sub or dub mode
 final selectedModeProvider = StateProvider<String>((ref) => 'sub');
 
-// Current search query
+// Current search query for anime
 final searchQueryProvider = StateProvider<String>((ref) => '');
+
+// Search query for episodes within a show
+final episodeSearchProvider = StateProvider<String>((ref) => '');
 
 // --- AniList API Providers ---
 
@@ -48,4 +51,11 @@ final scraperIdProvider = FutureProvider.family<String?, ({String title, String?
     if (engResults.isNotEmpty) return engResults.first['id'];
   }
   return null;
+});
+
+// Provides detailed information for a specific show (description, genres, etc.)
+final showDetailsProvider = FutureProvider.family<AnimeMedia?, String>((ref, showId) async {
+  final details = await ScraperApi().getShowDetails(showId);
+  if (details == null) return null;
+  return AnimeMedia.fromAllAnime(details);
 });

@@ -94,4 +94,24 @@ class AniListApi {
       return null;
     }
   }
+
+  Future<int?> getMalIdByTitle(String title) async {
+    const String gqlQuery = r'''
+      query ($search: String) {
+        Media(search: $search, type: ANIME) {
+          idMal
+        }
+      }
+    ''';
+
+    try {
+      final response = await _dio.post(apiUrl, data: {
+        "query": gqlQuery,
+        "variables": {"search": title}
+      });
+      return response.data['data']['Media']['idMal'];
+    } catch (e) {
+      return null;
+    }
+  }
 }

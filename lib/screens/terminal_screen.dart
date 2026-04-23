@@ -272,9 +272,9 @@ class _TerminalScreenState extends ConsumerState<TerminalScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: Colors.black,
+      backgroundColor: const Color(0xFF0A0C12),
       appBar: AppBar(
-        backgroundColor: Colors.grey[900],
+        backgroundColor: const Color(0xFF1E2130),
         title: Text("Terminal", style: GoogleFonts.robotoMono(fontSize: 16)),
         elevation: 0,
         actions: [
@@ -305,7 +305,7 @@ class _TerminalScreenState extends ConsumerState<TerminalScreen> {
             ),
           ),
           Container(
-            color: Colors.grey[900],
+            color: const Color(0xFF1E2130),
             padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
             child: Row(
               children: [

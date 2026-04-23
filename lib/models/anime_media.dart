@@ -7,6 +7,7 @@ class AnimeMedia {
   final String? description;
   final int? score;
   final List<String> genres;
+  final Map<String, dynamic> extras;
 
   AnimeMedia({
     required this.id,
@@ -17,6 +18,7 @@ class AnimeMedia {
     this.description,
     this.score,
     this.genres = const [],
+    this.extras = const {},
   });
 
   factory AnimeMedia.fromAniList(Map<String, dynamic> json) {
@@ -29,6 +31,7 @@ class AnimeMedia {
       description: json['description'],
       score: json['averageScore'],
       genres: List<String>.from(json['genres'] ?? []),
+      extras: json,
     );
   }
 
@@ -43,6 +46,7 @@ class AnimeMedia {
       description: json['description'],
       genres: List<String>.from(json['genres'] ?? []),
       score: (double.tryParse(json['score']?.toString() ?? '0') ?? 0).toInt(),
+      extras: json,
     );
   }
 }

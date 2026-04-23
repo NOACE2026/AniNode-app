@@ -1,11 +1,13 @@
+import 'package:flutter_test/flutter_test.dart';
 import 'package:dio/dio.dart';
-import 'lib/api/scraper_api.dart';
+import '../lib/api/scraper_api.dart';
 
-void main() async {
-  final api = ScraperApi();
-  final dio = Dio();
-  
-  print('Searching and resolving a source...');
+void main() {
+  test('Research Stream Headers', () async {
+    final api = ScraperApi();
+    final dio = Dio();
+    
+    print('Searching and resolving a source...');
   final search = await api.search('One Piece');
   final id = search.first['id'];
   final eps = await api.getEpisodesList(id);
@@ -14,7 +16,16 @@ void main() async {
   if (sources.isEmpty) return;
   
   final source = sources.first;
-  final url = await api.resolveSource(source['url']!);
+  print('Resolving source URL: ${source['url']}');
+  
+  if (source['url']!.contains('streaming.php') || source['url']!.contains('load.php')) {
+    final res = await Dio().get(source['url']!);
+    print('Iframe HTML snippet: ${res.data.toString().substring(0, 500)}');
+  }
+
+  final resolved = await api.resolveSource(source['url']!);
+  final url = resolved['url'];
+  final referer = resolved['referer'];
   print('Resolved URL: $url');
   
   if (url == null) return;
@@ -25,7 +36,7 @@ void main() async {
       url,
       options: Options(headers: {
         'User-Agent': ScraperApi.userAgent,
-        'Referer': ScraperApi.baseUrl,
+        'Referer': referer ?? ScraperApi.baseUrl,
       }),
     );
     print('Content-Type: ${response.headers.value('content-type')}');
@@ -49,5 +60,6 @@ void main() async {
     } catch (e2) {
       print('GET request failed: $e2');
     }
-  }
+    }
+  });
 }

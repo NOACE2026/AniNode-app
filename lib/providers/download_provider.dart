@@ -62,6 +62,7 @@ class DownloadNotifier extends Notifier<Map<String, DownloadItem>> {
     required String episode,
     required String sourceUrl,
     String? bannerUrl,
+    String? referer,
   }) async {
     final id = "${showId}_$episode";
     if (state.containsKey(id) && state[id]!.status == DownloadStatus.completed) return;
@@ -83,7 +84,10 @@ class DownloadNotifier extends Notifier<Map<String, DownloadItem>> {
 
     try {
       // 1. Resolve direct URL
-      final directUrl = await _scraper.resolveSource(sourceUrl);
+      final resolved = await _scraper.resolveSource(sourceUrl);
+      final directUrl = resolved['url'];
+      final resolvedReferer = resolved['referer'];
+      
       if (directUrl == null) throw Exception("Could not resolve source URL");
 
       // 2. Prepare file path
@@ -98,6 +102,12 @@ class DownloadNotifier extends Notifier<Map<String, DownloadItem>> {
       await _dio.download(
         directUrl,
         filePath,
+        options: Options(
+          headers: {
+            'User-Agent': ScraperApi.userAgent,
+            'Referer': resolvedReferer ?? referer ?? ScraperApi.baseUrl,
+          },
+        ),
         onReceiveProgress: (count, total) {
           if (total > 0) {
             state = {
@@ -107,6 +117,13 @@ class DownloadNotifier extends Notifier<Map<String, DownloadItem>> {
           }
         },
       );
+      
+      // 4. Verify file size (1kb files are usually error pages)
+      final file = File(filePath);
+      if (await file.length() < 50 * 1024) { // < 50KB
+        await file.delete();
+        throw Exception("Downloaded file is too small (possibly an error page).");
+      }
 
       state = {
         ...state,
