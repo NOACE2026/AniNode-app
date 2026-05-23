@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:cached_network_image/cached_network_image.dart';
-import '../api/scraper_api.dart';
+import '../api/jikan_service.dart';
 import '../providers/history_provider.dart';
 import '../providers/anime_provider.dart';
 import '../theme/cp.dart';
@@ -21,9 +21,12 @@ class _DetailsScreenState extends ConsumerState<DetailsScreen> {
 
   // Episode state
   final List<String> _episodes = [];
+  final Map<String, JikanEpisode> _jikanData = {};
   bool _epLoading = false;
+  bool _jikanLoading = false;
   String? _activeShowId;
-  String _lastMode = 'sub';
+  int? _malId;
+  int? _aniId;
 
   @override
   void initState() {
@@ -132,92 +135,101 @@ class _DetailsScreenState extends ConsumerState<DetailsScreen> {
     // Scroll handling disabled
   }
 
+  int? _getMalId() {
+    try {
+      if (widget.media is AnimeResult) return (widget.media as AnimeResult).malId;
+      return widget.media.malId as int?;
+    } catch (_) { return null; }
+  }
+
+  int? _getAniListId() {
+    try {
+      if (widget.media is AnimeResult) return (widget.media as AnimeResult).aniId;
+      final id = widget.media.id;
+      return id is int ? id : null;
+    } catch (_) { return null; }
+  }
+
+  int _getEpisodeCount() {
+    try {
+      if (widget.media is AnimeResult) return (widget.media as AnimeResult).totalEpisodes ?? 0;
+      return (widget.media.episodes as int?) ?? 0;
+    } catch (_) { return 0; }
+  }
+
   Future<void> _loadEpisodes() async {
     if (_epLoading) return;
-    setState(() { _epLoading = true; });
-    try {
-      final title = _getMediaTitle();
-      final results = await ScraperApi().searchStreams(title);
 
-      if (results.isEmpty) {
-        if (mounted) {
-          setState(() => _epLoading = false);
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('No episodes found')),
-          );
-        }
-        return;
-      }
+    _malId = _getMalId();
+    _aniId = _getAniListId();
 
-      final best = results.first;
-      final resultId = ScraperApi.extractResultId(best, 'anikoto');
-      ScraperApi.cacheStreamResult(resultId, best);
-
-      final epObjects = await ScraperApi().getEpisodes(best, resultId: resultId);
-      final epStrings = epObjects.asMap().entries
-          .map((e) => ScraperApi.extractEpNum(e.value, e.key))
-          .toList();
-
-      ScraperApi.cacheEpisodeObjects(resultId, epObjects);
-
+    if (_malId == null && _aniId == null) {
       if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('No streaming ID found for this title')),
+        );
+      }
+      return;
+    }
+
+    _activeShowId = _malId != null ? 'mal_$_malId' : 'ani_$_aniId';
+
+    // Show numbered placeholders immediately from the known episode count.
+    final knownCount = _getEpisodeCount();
+    setState(() {
+      _epLoading = true;
+      if (knownCount > 0) {
+        _episodes.clear();
+        _episodes.addAll(List.generate(knownCount, (i) => '${i + 1}'));
+        _epLoading = false;
+      }
+    });
+
+    // Fetch Jikan data in background — titles + filler arrive page by page.
+    if (_malId != null) {
+      setState(() => _jikanLoading = true);
+      JikanService.fetchEpisodes(_malId!, onPage: (accumulated) {
+        if (!mounted) return;
         setState(() {
-          _activeShowId = resultId;
-          _episodes.clear();
-          _episodes.addAll(epStrings);
+          for (final ep in accumulated) {
+            _jikanData[ep.number] = ep;
+          }
+          // If we had no count initially, grow the list as Jikan pages arrive.
+          if (_episodes.length < accumulated.length) {
+            _episodes.clear();
+            _episodes.addAll(accumulated.map((e) => e.number));
+          }
           _epLoading = false;
         });
-      }
-    } catch (e) {
-      debugPrint('Episode load error: $e');
-      if (mounted) {
-        setState(() => _epLoading = false);
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Error loading episodes: $e')),
-        );
+      }).whenComplete(() {
+        if (mounted) setState(() => _jikanLoading = false);
+      });
+    } else {
+      // No MAL ID — episode count is our only source; placeholders only.
+      if (mounted && knownCount == 0) {
+        setState(() {
+          _episodes.clear();
+          _episodes.addAll(List.generate(1500, (i) => '${i + 1}'));
+          _epLoading = false;
+        });
       }
     }
   }
 
   void _play(List<String> allEps, int idx, String mode) {
-    final coverUrl = _getBannerUrl();
-
-    // Map all episodes to EpisodeStreams
-    final streams = <EpisodeStream>[];
-    for (int i = 0; i < allEps.length; i++) {
-      final epNum = allEps[i];
-      final epObj = ScraperApi.getCachedEpisode(_activeShowId ?? '', epNum);
-      final epInt = int.tryParse(epNum) ?? (i + 1);
-
-      String? sub;
-      String? dub;
-
-      if (epObj != null && epObj.id.toString().isNotEmpty) {
-        sub = epObj.subUrl ?? AnikotoProvider.streamUrlByEmbedId(epObj.id.toString(), lang: 'sub');
-        dub = epObj.dubUrl ?? AnikotoProvider.streamUrlByEmbedId(epObj.id.toString(), lang: 'dub');
-      } else if (_hasAniListData()) {
-        final aniId = widget.media.id as int;
-        final malId = widget.media.malId as int?;
-        if (malId != null) {
-          sub = AnikotoProvider.streamUrlByMal(malId, epInt, lang: 'sub');
-          dub = AnikotoProvider.streamUrlByMal(malId, epInt, lang: 'dub');
-        } else {
-          sub = AnikotoProvider.streamUrlByMal(aniId, epInt, lang: 'sub');
-          dub = AnikotoProvider.streamUrlByMal(aniId, epInt, lang: 'dub');
-        }
-      } else {
-        if (epObj != null) {
-          sub = epObj.subUrl ?? (epObj.id.isNotEmpty ? AnikotoProvider.streamUrlByEmbedId(epObj.id, lang: 'sub') : null);
-          dub = epObj.dubUrl ?? (epObj.id.isNotEmpty ? AnikotoProvider.streamUrlByEmbedId(epObj.id, lang: 'dub') : null);
-        }
+    final streams = allEps.asMap().entries.map((entry) {
+      final epNum = entry.value;
+      final epInt = int.tryParse(epNum) ?? (entry.key + 1);
+      String? sub, dub;
+      if (_malId != null) {
+        sub = AnikotoProvider.streamUrlByMal(_malId!, epInt, lang: 'sub');
+        dub = AnikotoProvider.streamUrlByMal(_malId!, epInt, lang: 'dub');
+      } else if (_aniId != null) {
+        sub = AnikotoProvider.streamUrlByAniList(_aniId!, epInt, lang: 'sub');
+        dub = AnikotoProvider.streamUrlByAniList(_aniId!, epInt, lang: 'dub');
       }
-
-      streams.add(EpisodeStream(
-        number: epNum,
-        subUrl: sub,
-        dubUrl: dub,
-      ));
-    }
+      return EpisodeStream(number: epNum, subUrl: sub, dubUrl: dub);
+    }).toList();
 
     Navigator.push(
       context,
@@ -229,7 +241,7 @@ class _DetailsScreenState extends ConsumerState<DetailsScreen> {
           initialIndex: idx,
           mode: mode,
           title: _getMediaTitle(),
-          imageUrl: coverUrl,
+          imageUrl: _getBannerUrl(),
         ),
       ),
     );
@@ -242,17 +254,6 @@ class _DetailsScreenState extends ConsumerState<DetailsScreen> {
     final historyAsync = ref.watch(historyProvider);
     final screenWidth = MediaQuery.of(context).size.width;
     final isWide = screenWidth > 800;
-
-    // Detect mode changes and re-trigger episode loading
-    if (_lastMode != mode) {
-      _lastMode = mode;
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        setState(() {
-          _episodes.clear();
-        });
-        _loadEpisodes();
-      });
-    }
 
     // Filter already-loaded episodes by the search query
     final filtered = searchQuery.isEmpty
@@ -454,9 +455,23 @@ class _DetailsScreenState extends ConsumerState<DetailsScreen> {
                   if (_episodes.isNotEmpty)
                     Padding(
                       padding: const EdgeInsets.only(bottom: 10),
-                      child: Text(
-                        '${_episodes.length} episodes loaded — complete',
-                        style: CP.mono(size: 10, color: CP.textMuted),
+                      child: Row(
+                        children: [
+                          Text(
+                            _jikanLoading
+                                ? '${_episodes.length} episodes — loading titles…'
+                                : '${_episodes.length} episodes',
+                            style: CP.mono(size: 10, color: CP.textMuted),
+                          ),
+                          if (_jikanLoading) ...[
+                            const SizedBox(width: 8),
+                            const SizedBox(
+                              width: 8, height: 8,
+                              child: CircularProgressIndicator(
+                                  color: CP.cyan, strokeWidth: 1.5),
+                            ),
+                          ],
+                        ],
                       ),
                     ),
                   const _EpisodeSearch(),
@@ -506,6 +521,7 @@ class _DetailsScreenState extends ConsumerState<DetailsScreen> {
                     final watched = progress != null && progress.percent > 0.9;
                     return _EpisodeGridCell(
                       epNum: epNum,
+                      jikanEp: _jikanData[epNum],
                       progress: progress,
                       watched: watched,
                       onTap: () => _play(
@@ -532,6 +548,7 @@ class _DetailsScreenState extends ConsumerState<DetailsScreen> {
                       padding: const EdgeInsets.only(bottom: 8),
                       child: _EpisodeListTile(
                         epNum: epNum,
+                        jikanEp: _jikanData[epNum],
                         progress: progress,
                         watched: watched,
                         onTap: () => _play(
@@ -675,11 +692,13 @@ class _EpisodeSearch extends ConsumerWidget {
 
 class _EpisodeGridCell extends StatelessWidget {
   final String epNum;
+  final JikanEpisode? jikanEp;
   final WatchProgress? progress;
   final bool watched;
   final VoidCallback onTap;
   const _EpisodeGridCell({
     required this.epNum,
+    required this.jikanEp,
     required this.progress,
     required this.watched,
     required this.onTap,
@@ -687,31 +706,32 @@ class _EpisodeGridCell extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final color = watched ? CP.magenta : CP.cyan;
+    final isFiller = jikanEp?.isFiller ?? false;
+    final color = watched ? CP.magenta : isFiller ? CP.yellow : CP.cyan;
     return GestureDetector(
       onTap: onTap,
       child: Container(
         decoration: BoxDecoration(
-          color: CP.surface,
+          color: isFiller ? CP.yellow.withValues(alpha: 0.06) : CP.surface,
           borderRadius: BorderRadius.circular(3),
-          border:
-              Border.all(color: color.withValues(alpha: watched ? 0.4 : 0.15)),
+          border: Border.all(color: color.withValues(alpha: watched || isFiller ? 0.4 : 0.15)),
         ),
         child: Stack(
           children: [
             Center(
               child: Text(epNum,
-                  style: CP.mono(
-                      size: 13, color: watched ? CP.magenta : CP.text)),
+                  style: CP.mono(size: 13, color: color)),
             ),
+            if (isFiller)
+              Positioned(
+                top: 2, left: 3,
+                child: Text('F', style: CP.mono(size: 8, color: CP.yellow)),
+              ),
             if (progress != null && progress!.percent > 0 && !watched)
               Positioned(
-                bottom: 0,
-                left: 0,
-                right: 0,
+                bottom: 0, left: 0, right: 0,
                 child: ClipRRect(
-                  borderRadius:
-                      const BorderRadius.vertical(bottom: Radius.circular(3)),
+                  borderRadius: const BorderRadius.vertical(bottom: Radius.circular(3)),
                   child: LinearProgressIndicator(
                     value: progress!.percent,
                     minHeight: 2,
@@ -731,11 +751,13 @@ class _EpisodeGridCell extends StatelessWidget {
 
 class _EpisodeListTile extends StatelessWidget {
   final String epNum;
+  final JikanEpisode? jikanEp;
   final WatchProgress? progress;
   final bool watched;
   final VoidCallback onTap;
   const _EpisodeListTile({
     required this.epNum,
+    required this.jikanEp,
     required this.progress,
     required this.watched,
     required this.onTap,
@@ -743,21 +765,23 @@ class _EpisodeListTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final isFiller = jikanEp?.isFiller ?? false;
+    final isRecap = jikanEp?.isRecap ?? false;
+    final title = jikanEp?.title;
+    final accentColor = watched ? CP.magenta : isFiller ? CP.yellow : CP.cyan;
+
     return GestureDetector(
       onTap: onTap,
       child: Container(
         decoration: BoxDecoration(
-          color: CP.surface,
+          color: isFiller ? CP.yellow.withValues(alpha: 0.04) : CP.surface,
           borderRadius: BorderRadius.circular(4),
-          border: Border.all(
-            color: watched
-                ? CP.magenta.withValues(alpha: 0.4)
-                : CP.cyan.withValues(alpha: 0.12),
-          ),
+          border: Border.all(color: accentColor.withValues(alpha: watched || isFiller ? 0.4 : 0.12)),
           boxShadow: watched
-              ? [BoxShadow(
-                  color: CP.magenta.withValues(alpha: 0.07), blurRadius: 8)]
-              : null,
+              ? [BoxShadow(color: CP.magenta.withValues(alpha: 0.07), blurRadius: 8)]
+              : isFiller
+                  ? [BoxShadow(color: CP.yellow.withValues(alpha: 0.06), blurRadius: 6)]
+                  : null,
         ),
         child: Column(
           mainAxisSize: MainAxisSize.min,
@@ -770,21 +794,12 @@ class _EpisodeListTile extends StatelessWidget {
                     width: 46,
                     height: 46,
                     decoration: BoxDecoration(
-                      color: watched
-                          ? CP.magenta.withValues(alpha: 0.1)
-                          : CP.card,
+                      color: accentColor.withValues(alpha: 0.1),
                       borderRadius: BorderRadius.circular(3),
-                      border: Border.all(
-                        color: watched
-                            ? CP.magenta.withValues(alpha: 0.5)
-                            : CP.cyan.withValues(alpha: 0.2),
-                      ),
+                      border: Border.all(color: accentColor.withValues(alpha: 0.4)),
                     ),
                     child: Center(
-                      child: Text(epNum,
-                          style: CP.mono(
-                              size: 14,
-                              color: watched ? CP.magenta : CP.cyan)),
+                      child: Text(epNum, style: CP.mono(size: 14, color: accentColor)),
                     ),
                   ),
                   const SizedBox(width: 14),
@@ -792,31 +807,39 @@ class _EpisodeListTile extends StatelessWidget {
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Text('Episode $epNum',
-                            style: CP.rajdhani(
-                                size: 15, weight: FontWeight.w600)),
-                        if (watched)
-                          Row(
-                            children: [
-                              Icon(Icons.check_circle_rounded,
-                                  color: CP.magenta, size: 12),
+                        Text(
+                          title ?? 'Episode $epNum',
+                          style: CP.rajdhani(size: 15, weight: FontWeight.w600),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                        const SizedBox(height: 3),
+                        Row(
+                          children: [
+                            if (watched) ...[
+                              Icon(Icons.check_circle_rounded, color: CP.magenta, size: 11),
                               const SizedBox(width: 4),
-                              Text('WATCHED',
-                                  style: CP.mono(size: 10, color: CP.magenta)),
+                              Text('WATCHED', style: CP.mono(size: 9, color: CP.magenta)),
+                              const SizedBox(width: 8),
                             ],
-                          ),
+                            if (isFiller) ...[
+                              Text('FILLER', style: CP.mono(size: 9, color: CP.yellow)),
+                              const SizedBox(width: 8),
+                            ],
+                            if (isRecap)
+                              Text('RECAP', style: CP.mono(size: 9, color: CP.textMuted)),
+                          ],
+                        ),
                       ],
                     ),
                   ),
-                  Icon(Icons.play_circle_outline_rounded,
-                      color: CP.textDim, size: 22),
+                  Icon(Icons.play_circle_outline_rounded, color: CP.textDim, size: 22),
                 ],
               ),
             ),
             if (progress != null && progress!.percent > 0 && !watched)
               ClipRRect(
-                borderRadius:
-                    const BorderRadius.vertical(bottom: Radius.circular(4)),
+                borderRadius: const BorderRadius.vertical(bottom: Radius.circular(4)),
                 child: LinearProgressIndicator(
                   value: progress!.percent,
                   minHeight: 3,

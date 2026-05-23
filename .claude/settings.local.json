@@ -1,0 +1,12 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(fvm install *)",
+      "Bash(curl -s \"https://anikotoapi.site/recent-anime?page=1&per_page=2\")",
+      "Bash(curl -s \"https://anikotoapi.site/series/1\")",
+      "Bash(curl -s \"https://anikotoapi.site/series/8630\")",
+      "Bash(flutter pub *)",
+      "Bash(flutter analyze *)"
+    ]
+  }
+}

@@ -164,6 +164,12 @@ class HistoryNotifier extends AsyncNotifier<Map<String, WatchProgress>> {
       ));
     }
   }
+
+  Future<void> clearAll() async {
+    state = const AsyncValue.data({});
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.remove(_prefKey);
+  }
 }
 
 final historyProvider = AsyncNotifierProvider<HistoryNotifier, Map<String, WatchProgress>>(() {

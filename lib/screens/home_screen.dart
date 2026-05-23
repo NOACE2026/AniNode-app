@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:ui';
 import 'package:flutter/material.dart';
+import 'package:flutter_inappwebview/flutter_inappwebview.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import '../providers/anime_provider.dart';
@@ -943,6 +944,7 @@ class _CyberAppBar extends ConsumerWidget implements PreferredSizeWidget {
                         MaterialPageRoute(builder: (_) => const SearchScreen()))),
                     _iconBtn(Icons.terminal_rounded, () => Navigator.push(context,
                         MaterialPageRoute(builder: (_) => const TerminalScreen()))),
+                    _iconBtn(Icons.delete_sweep_rounded, () => _confirmClearData(context, ref)),
                     _iconBtn(Icons.power_settings_new_rounded, () => _confirmLogout(context, ref)),
                   ],
                 ),
@@ -959,6 +961,34 @@ class _CyberAppBar extends ConsumerWidget implements PreferredSizeWidget {
         onPressed: onTap,
         splashRadius: 20,
       );
+
+  void _confirmClearData(BuildContext context, WidgetRef ref) {
+    showDialog(
+      context: context,
+      builder: (c) => AlertDialog(
+        backgroundColor: CP.surface,
+        title: Text('CLEAR DATA', style: CP.orbitron(size: 14, color: CP.yellow)),
+        content: Text(
+          'This will delete all watch history and clear the browser cache.',
+          style: CP.rajdhani(color: CP.textDim),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(c),
+            child: Text('CANCEL', style: CP.mono(color: CP.textDim)),
+          ),
+          TextButton(
+            onPressed: () async {
+              Navigator.pop(c);
+              await ref.read(historyProvider.notifier).clearAll();
+              await InAppWebViewController.clearAllCache();
+            },
+            child: Text('CLEAR', style: CP.mono(color: CP.yellow)),
+          ),
+        ],
+      ),
+    );
+  }
 
   void _confirmLogout(BuildContext context, WidgetRef ref) {
     showDialog(

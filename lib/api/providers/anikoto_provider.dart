@@ -196,36 +196,60 @@ class AnikotoProvider {
     }
   }
 
-  /// Fetch a full episode list for a series by its numeric API id.
+  /// Fetch the full episode list for a series, paginating until exhausted.
   Future<List<Episode>> fetchEpisodes(int seriesId) async {
-    try {
-      final resp = await _dio.get(
-        '$apiUrl/series/$seriesId',
-        options: Options(validateStatus: (s) => s != null && s < 600),
-      );
-      if (resp.statusCode != 200 || resp.data is! Map) {
-        debugPrint('[Anikoto] series $seriesId → ${resp.statusCode}');
-        return [];
-      }
-      final data = (resp.data as Map)['data'];
-      if (data is! Map) return [];
-      final eps = (data['episodes'] as List?) ?? [];
-      return eps.whereType<Map>().map((e) {
-        final embed = (e['embed_url'] as Map?) ?? const {};
-        final num = (e['number'] ?? '').toString();
-        return Episode(
-          id: (e['id'] ?? e['episode_embed_id'] ?? num).toString(),
-          number: num,
-          title: (e['title'] ?? 'Episode $num').toString(),
-          url: '$baseUrl/watch/${data['anime']?['slug'] ?? ''}?ep=${e['id']}',
-          subUrl: embed['sub']?.toString(),
-          dubUrl: embed['dub']?.toString(),
+    final all = <Episode>[];
+    String? slug;
+    var page = 1;
+
+    while (page <= 100) {
+      try {
+        final resp = await _dio.get(
+          '$apiUrl/series/$seriesId',
+          queryParameters: {'page': page, 'per_page': 100},
+          options: Options(validateStatus: (s) => s != null && s < 600),
         );
-      }).toList();
-    } catch (e) {
-      debugPrint('[Anikoto] fetchEpisodes error: $e');
-      return [];
+        if (resp.statusCode != 200 || resp.data is! Map) {
+          debugPrint('[Anikoto] series $seriesId p$page → ${resp.statusCode}');
+          break;
+        }
+        final body = resp.data as Map;
+        final data = body['data'];
+        if (data is! Map) break;
+
+        slug ??= data['anime']?['slug']?.toString() ?? '';
+
+        final eps = (data['episodes'] as List?) ?? [];
+        debugPrint('[Anikoto] series $seriesId p$page → ${eps.length} eps');
+        if (eps.isEmpty) break;
+
+        for (final e in eps.whereType<Map>()) {
+          final embed = e['embed_url'];
+          final embedMap = embed is Map ? embed : <String, dynamic>{};
+          final num = (e['number'] ?? '').toString();
+          final id = (e['id'] ?? e['episode_embed_id'] ?? num).toString();
+          all.add(Episode(
+            id: id,
+            number: num,
+            title: (e['title'] ?? 'Episode $num').toString(),
+            url: '$baseUrl/watch/$slug?ep=$id',
+            subUrl: embedMap['sub']?.toString(),
+            dubUrl: embedMap['dub']?.toString(),
+          ));
+        }
+
+        final pag = body['pagination'];
+        final hasNext = pag is Map ? (pag['has_next_page'] as bool? ?? false) : false;
+        if (!hasNext) break;
+        page++;
+      } catch (e) {
+        debugPrint('[Anikoto] fetchEpisodes p$page error: $e');
+        break;
+      }
     }
+
+    debugPrint('[Anikoto] series $seriesId total → ${all.length} episodes');
+    return all;
   }
 
   // ── Helpers ──────────────────────────────────────────────────────────────

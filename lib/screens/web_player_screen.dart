@@ -65,6 +65,11 @@ class _WebPlayerScreenState extends ConsumerState<WebPlayerScreen> {
 
   double _lastSavedPos = -1;
   DateTime _lastSavedAt = DateTime.fromMillisecondsSinceEpoch(0);
+  bool _loadTriggered = false; // prevent double _loadCurrent() on init
+  // Timestamp of the last loadUrl() call. Events arriving within 2 s of a
+  // URL change are from the OLD page (WebView2 doesn't flush them instantly)
+  // and must be discarded to prevent stale-position saves and crashes.
+  DateTime _lastLoadAt = DateTime.fromMillisecondsSinceEpoch(0);
 
   // The WebView must be created once and reused across layout changes —
   // otherwise rotating to landscape (or any rebuild that swaps which layout
@@ -89,14 +94,17 @@ class _WebPlayerScreenState extends ConsumerState<WebPlayerScreen> {
       setState(() => _fillerEpisodes = set);
     });
     LocalPlayerServer.start().then((_) {
-      if (mounted && _web != null) {
+      if (mounted && _web != null && !_loadTriggered) {
+        _loadTriggered = true;
         _loadCurrent();
       }
     });
   }
 
   void _handlePlayerMessage(String jsonStr) {
-    debugPrint('[player msg] $jsonStr');
+    // Discard events that arrived within 2 s of the last loadUrl() — they are
+    // stale postMessages from the previous page still draining through WebView2.
+    if (DateTime.now().difference(_lastLoadAt).inMilliseconds < 2000) return;
     try {
       var decoded = jsonDecode(jsonStr);
       // Bridge wraps as { _origin, data } — unwrap.
@@ -145,7 +153,7 @@ class _WebPlayerScreenState extends ConsumerState<WebPlayerScreen> {
           if (!movedEnough && !dueByTime) return;
           _lastSavedPos = posSeconds;
           _lastSavedAt = now;
-          unawaited(ref.read(historyProvider.notifier).saveProgress(
+          ref.read(historyProvider.notifier).saveProgress(
                 animeId: widget.animeId,
                 showId: widget.showId,
                 episode: _currentEpisode.number,
@@ -155,13 +163,13 @@ class _WebPlayerScreenState extends ConsumerState<WebPlayerScreen> {
                 position: Duration(milliseconds: (posSeconds * 1000).toInt()),
                 duration: Duration(milliseconds: (durSeconds * 1000).toInt()),
                 streams: _savedStreams,
-              ));
+              ).catchError((_) {});
         }
       } else if (type == 'complete') {
-        unawaited(ref.read(historyProvider.notifier).resetProgress(
+        ref.read(historyProvider.notifier).resetProgress(
               widget.showId,
               _currentEpisode.number,
-            ));
+            ).catchError((_) {});
         if (_currentIndex < widget.episodes.length - 1) {
           _switchEpisode(_currentIndex + 1);
         }
@@ -198,11 +206,17 @@ class _WebPlayerScreenState extends ConsumerState<WebPlayerScreen> {
     }
 
     if (LocalPlayerServer.port == null) {
+      setState(() {
+        _loading = false;
+        _error = 'Player server not ready — please retry';
+      });
       return;
     }
 
     final localhostUrl = 'http://localhost:${LocalPlayerServer.port}/play?url=${Uri.encodeComponent(url)}';
 
+    setState(() { _loading = true; _error = null; });
+    _lastLoadAt = DateTime.now();
     _web?.loadUrl(
       urlRequest: URLRequest(
         url: WebUri(localhostUrl),
@@ -251,6 +265,7 @@ class _WebPlayerScreenState extends ConsumerState<WebPlayerScreen> {
       _loading = true;
       _error = null;
     });
+    _loadTriggered = true; // not an init load — always proceed
     _loadCurrent();
   }
 
@@ -263,6 +278,7 @@ class _WebPlayerScreenState extends ConsumerState<WebPlayerScreen> {
       return;
     }
     setState(() => _mode = next);
+    _loadTriggered = true;
     _loadCurrent();
   }
 
@@ -299,6 +315,9 @@ class _WebPlayerScreenState extends ConsumerState<WebPlayerScreen> {
           allowUniversalAccessFromFileURLs: true,
           allowsInlineMediaPlayback: true,
           allowsPictureInPictureMediaPlayback: true,
+          // Disable disk cache — HLS segments are never reused and can fill
+          // the drive within a few hours of watching on Windows (WebView2).
+          cacheEnabled: false,
           userAgent:
               'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
         ),
@@ -312,7 +331,10 @@ class _WebPlayerScreenState extends ConsumerState<WebPlayerScreen> {
               }
             },
           );
-          if (LocalPlayerServer.port != null) _loadCurrent();
+          if (LocalPlayerServer.port != null && !_loadTriggered) {
+            _loadTriggered = true;
+            _loadCurrent();
+          }
         },
         onCreateWindow: (controller, _) async => false,
         shouldOverrideUrlLoading: (controller, navigationAction) async {
@@ -334,44 +356,63 @@ class _WebPlayerScreenState extends ConsumerState<WebPlayerScreen> {
               urlStr.contains('blob:')) {
             return NavigationActionPolicy.ALLOW;
           }
-          if (urlStr.contains('ad') ||
-              urlStr.contains('pop') ||
-              urlStr.contains('click')) {
+          // Block obvious ad/pop-under navigation patterns.
+          final uri2 = Uri.tryParse(urlStr);
+          final host = uri2?.host ?? '';
+          if (host.startsWith('ad.') ||
+              host.startsWith('ads.') ||
+              host.startsWith('pop.') ||
+              host.startsWith('click.') ||
+              host.contains('.ad.') ||
+              host.contains('popunder') ||
+              host.contains('popads')) {
             return NavigationActionPolicy.CANCEL;
           }
           return NavigationActionPolicy.ALLOW;
         },
         onLoadStart: (controller, url) {
-          setState(() {
-            _loading = true;
-            _error = null;
-          });
+          // Only track loading state for our own localhost wrapper page.
+          // Megaplay's iframe navigations also fire this callback on WebView2
+          // (Windows) — ignoring them prevents the spinner from getting stuck.
+          if (!mounted) return;
+          final urlStr = url?.toString() ?? '';
+          if (urlStr.startsWith('http://localhost')) {
+            setState(() {
+              _loading = true;
+              _error = null;
+            });
+          }
         },
         onLoadStop: (controller, url) async {
-          setState(() => _loading = false);
-          // Forward every postMessage we get (regardless of origin) so we can
-          // see what the embed actually emits. The Flutter side filters out
-          // anything it doesn't recognise.
-          await controller.evaluateJavascript(source: '''
-            (function() {
-              if (window.__aninodeBridgeInstalled) return;
-              window.__aninodeBridgeInstalled = true;
-              window.addEventListener('message', function(event) {
-                try {
-                  var payload = event.data;
-                  if (typeof payload === 'string') {
-                    try { payload = JSON.parse(payload); } catch (_) {}
+          if (!mounted) return;
+          final urlStr = url?.toString() ?? '';
+          if (urlStr.startsWith('http://localhost')) {
+            setState(() => _loading = false);
+          }
+          // Install postMessage bridge on every page load (idempotent guard inside).
+          try {
+            await controller.evaluateJavascript(source: '''
+              (function() {
+                if (window.__aninodeBridgeInstalled) return;
+                window.__aninodeBridgeInstalled = true;
+                window.addEventListener('message', function(event) {
+                  try {
+                    var payload = event.data;
+                    if (typeof payload === 'string') {
+                      try { payload = JSON.parse(payload); } catch (_) {}
+                    }
+                    var wrapped = { _origin: event.origin, data: payload };
+                    window.flutter_inappwebview.callHandler('PlayerChannel', JSON.stringify(wrapped));
+                  } catch (e) {
+                    console.error('bridge error', e);
                   }
-                  var wrapped = { _origin: event.origin, data: payload };
-                  window.flutter_inappwebview.callHandler('PlayerChannel', JSON.stringify(wrapped));
-                } catch (e) {
-                  console.error('bridge error', e);
-                }
-              });
-            })();
-          ''');
+                });
+              })();
+            ''');
+          } catch (_) {}
         },
         onReceivedError: (controller, request, error) {
+          if (!mounted) return;
           final url = request.url.toString();
           if ((request.isForMainFrame ?? false) && url.startsWith('http://localhost')) {
             setState(() {
@@ -381,8 +422,9 @@ class _WebPlayerScreenState extends ConsumerState<WebPlayerScreen> {
           }
         },
         onEnterFullscreen: (controller) async {
+          if (!mounted) return;
           if (Platform.isWindows || Platform.isLinux || Platform.isMacOS) {
-            if (mounted) setState(() => _desktopFullscreen = true);
+            setState(() => _desktopFullscreen = true);
             return;
           }
           await SystemChrome.setPreferredOrientations([
@@ -392,8 +434,9 @@ class _WebPlayerScreenState extends ConsumerState<WebPlayerScreen> {
           await SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
         },
         onExitFullscreen: (controller) async {
+          if (!mounted) return;
           if (Platform.isWindows || Platform.isLinux || Platform.isMacOS) {
-            if (mounted) setState(() => _desktopFullscreen = false);
+            setState(() => _desktopFullscreen = false);
             return;
           }
           await SystemChrome.setPreferredOrientations([
@@ -1047,8 +1090,10 @@ class _EpisodeGridItem extends StatelessWidget {
 class LocalPlayerServer {
   static HttpServer? _server;
   static int? port;
+  static int _refCount = 0;
 
   static Future<void> start() async {
+    _refCount++;
     if (_server != null) return;
     try {
       _server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
@@ -1106,6 +1151,8 @@ class LocalPlayerServer {
   }
 
   static void stop() {
+    _refCount = (_refCount - 1).clamp(0, 999);
+    if (_refCount > 0) return; // another player instance is still using the server
     try {
       _server?.close(force: true);
     } catch (_) {}
