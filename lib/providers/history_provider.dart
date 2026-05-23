@@ -3,6 +3,24 @@ import 'dart:convert';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+/// One stream entry as persisted in history. Mirrors EpisodeStream but kept
+/// here so this file has no dependency on web_player_screen.dart.
+class SavedStream {
+  final String number;
+  final String? subUrl;
+  final String? dubUrl;
+  const SavedStream({required this.number, this.subUrl, this.dubUrl});
+
+  Map<String, dynamic> toJson() =>
+      {'number': number, 'subUrl': subUrl, 'dubUrl': dubUrl};
+
+  factory SavedStream.fromJson(Map<String, dynamic> j) => SavedStream(
+        number: j['number']?.toString() ?? '',
+        subUrl: j['subUrl']?.toString(),
+        dubUrl: j['dubUrl']?.toString(),
+      );
+}
+
 class WatchProgress {
   final String animeId; // Previously AniList ID, now Scraper ID or stringified int
   final String showId; // Scraper ID
@@ -13,6 +31,9 @@ class WatchProgress {
   final int position;
   final int duration;
   final DateTime updatedAt;
+  // Full per-episode stream list captured at play-time. When present, resume
+  // can rebuild the player without re-fetching from the API.
+  final List<SavedStream>? streams;
 
   WatchProgress({
     required this.animeId,
@@ -24,6 +45,7 @@ class WatchProgress {
     required this.position,
     required this.duration,
     required this.updatedAt,
+    this.streams,
   });
 
   Map<String, dynamic> toJson() => {
@@ -36,19 +58,29 @@ class WatchProgress {
     'position': position,
     'duration': duration,
     'updatedAt': updatedAt.toIso8601String(),
+    'streams': streams?.map((s) => s.toJson()).toList(),
   };
 
   factory WatchProgress.fromJson(Map<String, dynamic> json) {
+    final rawStreams = json['streams'];
+    List<SavedStream>? streams;
+    if (rawStreams is List) {
+      streams = rawStreams
+          .whereType<Map>()
+          .map((m) => SavedStream.fromJson(Map<String, dynamic>.from(m)))
+          .toList();
+    }
     return WatchProgress(
       animeId: json['animeId']?.toString() ?? '',
       showId: json['showId']?.toString() ?? '',
       episode: json['episode']?.toString() ?? '',
       title: json['title']?.toString() ?? 'Unknown',
       imageUrl: json['imageUrl']?.toString(),
-      mode: json['mode']?.toString() ?? 'sub', 
+      mode: json['mode']?.toString() ?? 'sub',
       position: json['position'] is int ? json['position'] : int.tryParse(json['position']?.toString() ?? '') ?? 0,
       duration: json['duration'] is int ? json['duration'] : int.tryParse(json['duration']?.toString() ?? '') ?? 0,
       updatedAt: DateTime.tryParse(json['updatedAt']?.toString() ?? '') ?? DateTime.now(),
+      streams: streams,
     );
   }
 
@@ -88,8 +120,12 @@ class HistoryNotifier extends AsyncNotifier<Map<String, WatchProgress>> {
     required String mode,
     required Duration position,
     required Duration duration,
+    List<SavedStream>? streams,
   }) async {
     final key = '${showId}_$episode';
+    // Preserve the streams list from any existing entry if the caller doesn't
+    // pass one — episode time-events shouldn't drop the stored URLs.
+    final priorStreams = state.value?[key]?.streams;
     final progress = WatchProgress(
       animeId: animeId,
       showId: showId,
@@ -100,17 +136,15 @@ class HistoryNotifier extends AsyncNotifier<Map<String, WatchProgress>> {
       position: position.inMilliseconds,
       duration: duration.inMilliseconds,
       updatedAt: DateTime.now(),
+      streams: streams ?? priorStreams,
     );
 
-    // Update state safely
-    final currentState = state.value ?? {};
+    // Make sure the initial load has finished before merging — otherwise
+    // state.value would be null and we'd overwrite prefs with just this entry.
+    final currentState = await future;
     final newState = {...currentState, key: progress};
-    
-    Future.microtask(() {
-      state = AsyncValue.data(newState);
-    });
+    state = AsyncValue.data(newState);
 
-    // Persist
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString(_prefKey, jsonEncode(
       newState.map((k, v) => MapEntry(k, v.toJson())),
@@ -119,13 +153,10 @@ class HistoryNotifier extends AsyncNotifier<Map<String, WatchProgress>> {
 
   Future<void> resetProgress(String showId, String episode) async {
     final key = '${showId}_$episode';
-    final currentState = state.value ?? {};
+    final currentState = await future;
     if (currentState.containsKey(key)) {
       final newState = {...currentState}..remove(key);
-      
-      Future.microtask(() {
-        state = AsyncValue.data(newState);
-      });
+      state = AsyncValue.data(newState);
 
       final prefs = await SharedPreferences.getInstance();
       await prefs.setString(_prefKey, jsonEncode(

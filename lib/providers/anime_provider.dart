@@ -1,61 +1,142 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:flutter_riverpod/legacy.dart'; // Required for StateProvider in Riverpod 3.0 Alpha
 import '../api/scraper_api.dart';
-import '../models/anime_media.dart';
 
-// --- Shared State Providers ---
+// ── State Notifiers for mutable state ────────────────────────────────────
 
-// Provides the selection of sub or dub mode
-final selectedModeProvider = StateProvider<String>((ref) => 'sub');
+class SelectedModeNotifier extends Notifier<String> {
+  @override
+  String build() => 'sub';
+  void setMode(String m) => state = m;
+}
 
-// Current search query for anime
-final searchQueryProvider = StateProvider<String>((ref) => '');
+class SearchQueryNotifier extends Notifier<String> {
+  @override
+  String build() => '';
+  void set(String q) => state = q;
+}
 
-// Search query for episodes within a show
-final episodeSearchProvider = StateProvider<String>((ref) => '');
+class EpisodeSearchNotifier extends Notifier<String> {
+  @override
+  String build() => '';
+  void set(String q) => state = q;
+}
 
-// --- AniList API Providers ---
+// ── Providers ────────────────────────────────────────────────────────────
 
-// Trending anime for home screen
-final trendingAnimeProvider = FutureProvider<List<AnimeMedia>>((ref) async {
-  final mode = ref.watch(selectedModeProvider);
-  final api = ScraperApi();
-  final results = await api.fetchTrending(mode: mode);
-  return results.map((m) => AnimeMedia.fromAllAnime(m)).toList();
+final selectedModeProvider = NotifierProvider<SelectedModeNotifier, String>(
+  SelectedModeNotifier.new,
+);
+
+final searchQueryProvider = NotifierProvider<SearchQueryNotifier, String>(
+  SearchQueryNotifier.new,
+);
+
+final episodeSearchProvider = NotifierProvider<EpisodeSearchNotifier, String>(
+  EpisodeSearchNotifier.new,
+);
+
+// ── Episode Provider Parameters ──────────────────────────────────────────
+
+typedef EpisodesParams = ({String showId, String title, String mode});
+
+// ── Search and Episode Providers ─────────────────────────────────────────
+
+final searchMetadataProvider = FutureProvider.family<List<dynamic>, String>(
+  (ref, query) async {
+    if (query.trim().isEmpty) return [];
+    return ScraperApi().searchMetadata(query.trim());
+  },
+);
+
+final searchStreamsProvider = FutureProvider.family<List<dynamic>, String>(
+  (ref, query) async {
+    if (query.trim().isEmpty) return [];
+    return ScraperApi().searchStreams(query.trim());
+  },
+);
+
+final episodesProvider = FutureProvider.family<List<dynamic>, EpisodesParams>(
+  (ref, params) async {
+    var cached = ScraperApi.getCachedStreamResult(params.showId);
+    if (cached == null && params.title.isNotEmpty) {
+      // Cold start / history resume: re-search by title
+      final List<dynamic> results = await ScraperApi().searchStreams(params.title);
+      if (results.isNotEmpty) {
+        // Find the exact search result whose extracted ID matches showId to prevent mismatches (e.g. movies/spinoffs)
+        dynamic match = results.first;
+        for (final res in results) {
+          if (ScraperApi.extractResultId(res, 'anikoto') == params.showId) {
+            match = res;
+            break;
+          }
+        }
+        final id = ScraperApi.extractResultId(match, 'anikoto');
+        ScraperApi.cacheStreamResult(id, match);
+        cached = match;
+      }
+    }
+    if (cached == null) return [];
+    return ScraperApi().getEpisodes(cached, resultId: params.showId);
+  },
+);
+
+final sourcesProvider = FutureProvider.family<List<Map<String, String>>, dynamic>(
+  (ref, episode) async {
+    return ScraperApi().getSources(episode);
+  },
+);
+
+// ── Recently Updated ─────────────────────────────────────────────────────
+
+final recentAnimeProvider = FutureProvider<List<dynamic>>((ref) async {
+  return ScraperApi.anikoto.recent(perPage: 24);
 });
 
-// Search results based on searchQueryProvider
-final searchResultsProvider = FutureProvider<List<AnimeMedia>>((ref) async {
-  final query = ref.watch(searchQueryProvider);
-  if (query.isEmpty) return [];
-  
-  final mode = ref.watch(selectedModeProvider);
-  final api = ScraperApi();
-  final results = await api.search(query, mode: mode);
-  return results.map((m) => AnimeMedia.fromAllAnime(m)).toList();
-});
+// ── Infinite "Browse All" feed ───────────────────────────────────────────
 
-// --- Scraper API Providers ---
+class BrowseAllNotifier extends AsyncNotifier<List<dynamic>> {
+  static const int _perPage = 30;
+  int _page = 0;
+  bool _hasMore = true;
+  bool _loadingMore = false;
 
-// Fetches the episodes list for a specific show and mode
-final episodesProvider = FutureProvider.family<List<String>, ({String showId, String mode})>((ref, arg) async {
-  return ScraperApi().getEpisodesList(arg.showId, mode: arg.mode);
-});
+  bool get hasMore => _hasMore;
+  bool get loadingMore => _loadingMore;
 
-// Searches for a scraper-specific ID for a given anime title and mode
-final scraperIdProvider = FutureProvider.family<String?, ({String title, String? englishTitle, String mode})>((ref, arg) async {
-  final results = await ScraperApi().search(arg.title, mode: arg.mode);
-  if (results.isNotEmpty) return results.first['id'];
-  if (arg.englishTitle != null) {
-    final engResults = await ScraperApi().search(arg.englishTitle!, mode: arg.mode);
-    if (engResults.isNotEmpty) return engResults.first['id'];
+  @override
+  Future<List<dynamic>> build() async {
+    _page = 1;
+    final first = await ScraperApi.anikoto.recent(page: 1, perPage: _perPage);
+    _hasMore = first.length >= _perPage;
+    return first;
   }
-  return null;
-});
 
-// Provides detailed information for a specific show (description, genres, etc.)
-final showDetailsProvider = FutureProvider.family<AnimeMedia?, String>((ref, showId) async {
-  final details = await ScraperApi().getShowDetails(showId);
-  if (details == null) return null;
-  return AnimeMedia.fromAllAnime(details);
-});
+  Future<void> loadMore() async {
+    if (_loadingMore || !_hasMore) return;
+    _loadingMore = true;
+    // Ping listeners so the footer sliver can show a spinner. The list itself
+    // is unchanged.
+    state = AsyncValue.data(state.value ?? []);
+    try {
+      final next = await ScraperApi.anikoto
+          .recent(page: _page + 1, perPage: _perPage);
+      if (next.isEmpty) {
+        _hasMore = false;
+      } else {
+        _page++;
+        final current = state.value ?? const [];
+        state = AsyncValue.data([...current, ...next]);
+        if (next.length < _perPage) _hasMore = false;
+      }
+    } catch (_) {
+      // Leave state as-is; user can scroll again to retry.
+    } finally {
+      _loadingMore = false;
+      // Settle state so listeners get notified that loadingMore flipped.
+      state = AsyncValue.data(state.value ?? const []);
+    }
+  }
+}
+
+final browseAllProvider =
+    AsyncNotifierProvider<BrowseAllNotifier, List<dynamic>>(BrowseAllNotifier.new);

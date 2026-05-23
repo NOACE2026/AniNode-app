@@ -49,3 +49,6 @@ app.*.map.json
 *.txt
 *.webp
 dist/
+
+# FVM Version Cache
+.fvm/

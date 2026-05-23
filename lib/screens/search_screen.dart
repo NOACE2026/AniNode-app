@@ -1,118 +1,183 @@
-import 'dart:ui';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import '../providers/anime_provider.dart';
+import '../theme/cp.dart';
 import 'details_screen.dart';
 
-class SearchScreen extends ConsumerWidget {
+class SearchScreen extends ConsumerStatefulWidget {
   const SearchScreen({super.key});
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final searchResultsAsync = ref.watch(searchResultsProvider);
+  ConsumerState<SearchScreen> createState() => _SearchScreenState();
+}
+
+class _SearchScreenState extends ConsumerState<SearchScreen> {
+  late final TextEditingController _ctrl;
+
+  @override
+  void initState() {
+    super.initState();
+    _ctrl = TextEditingController(text: ref.read(searchQueryProvider));
+  }
+
+  @override
+  void dispose() {
+    _ctrl.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final query = _ctrl.text.trim();
+    final resultsAsync = ref.watch(searchMetadataProvider(query));
 
     return Scaffold(
-      backgroundColor: const Color(0xFF0A0C12),
+      backgroundColor: CP.bg,
       appBar: AppBar(
-        backgroundColor: const Color(0xFF1E2130),
+        backgroundColor: CP.surface,
         elevation: 0,
+        leading: IconButton(
+          icon: const Icon(Icons.arrow_back_ios_rounded, color: CP.cyan, size: 18),
+          onPressed: () => Navigator.pop(context),
+        ),
         title: TextField(
+          controller: _ctrl,
           autofocus: true,
+          style: CP.mono(size: 14, color: CP.text),
           decoration: InputDecoration(
-            hintText: 'Search anime...',
+            hintText: 'SEARCH ANIME...',
+            hintStyle: CP.mono(size: 13, color: CP.textMuted),
             border: InputBorder.none,
-            hintStyle: TextStyle(color: Colors.white.withOpacity(0.5)),
+            prefixIcon: Icon(Icons.search_rounded, color: CP.cyan.withValues(alpha: 0.6), size: 20),
           ),
-          style: const TextStyle(color: Colors.white),
-          onChanged: (value) {
-            ref.read(searchQueryProvider.notifier).state = value;
+          onChanged: (v) {
+            // Search query updated
+            setState(() {});
           },
         ),
-      ),
-      body: searchResultsAsync.when(
-        data: (results) {
-          if (results.isEmpty) {
-            return const Center(child: Text('Type to search for anime'));
-          }
-          return GridView.builder(
-            padding: const EdgeInsets.all(12),
-            gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-              crossAxisCount: 3,
-              childAspectRatio: 0.7,
-              crossAxisSpacing: 10,
-              mainAxisSpacing: 10,
+        bottom: PreferredSize(
+          preferredSize: const Size.fromHeight(1),
+          child: Container(
+            height: 1,
+            decoration: BoxDecoration(
+              gradient: LinearGradient(colors: [
+                CP.cyan.withValues(alpha: 0),
+                CP.cyan.withValues(alpha: 0.4),
+                CP.cyan.withValues(alpha: 0),
+              ]),
             ),
-            itemCount: results.length,
-            itemBuilder: (c, i) {
-              final anime = results[i];
-              return GestureDetector(
-                onTap: () {
-                  Navigator.push(context, MaterialPageRoute(builder: (c) => DetailsScreen(anime: anime)));
-                },
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Expanded(
-                      child: ClipRRect(
-                        borderRadius: BorderRadius.circular(16),
-                        child: Stack(
-                          children: [
-                            CachedNetworkImage(
-                              imageUrl: anime.coverUrl ?? '',
-                              fit: BoxFit.cover,
-                              height: double.infinity,
-                              width: double.infinity,
-                              placeholder: (c, u) => Container(color: Colors.white10),
-                            ),
-                            Positioned(
-                              top: 8,
-                              right: 8,
-                              child: ClipRRect(
-                                borderRadius: BorderRadius.circular(8),
-                                child: BackdropFilter(
-                                  filter: ImageFilter.blur(sigmaX: 5, sigmaY: 5),
-                                  child: Container(
-                                    padding: const EdgeInsets.symmetric(
-                                      horizontal: 8,
-                                      vertical: 4,
-                                    ),
-                                    decoration: BoxDecoration(
-                                      color: Colors.black.withOpacity(0.5),
-                                      borderRadius: BorderRadius.circular(8),
-                                      border: Border.all(color: Colors.white.withOpacity(0.1)),
-                                    ),
-                                    child: Text(
-                                      anime.extras['type'] ?? 'TV',
-                                      style: const TextStyle(
-                                        fontSize: 10,
-                                        fontWeight: FontWeight.bold,
-                                        color: Colors.white,
+          ),
+        ),
+      ),
+      body: resultsAsync.when(
+        data: (results) {
+          if (query.isEmpty) {
+            return Center(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(Icons.search_rounded, color: CP.textMuted, size: 48),
+                  const SizedBox(height: 12),
+                  Text('TYPE TO SEARCH', style: CP.mono(size: 12, color: CP.textMuted)),
+                ],
+              ),
+            );
+          }
+          if (results.isEmpty) {
+            return Center(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(Icons.search_off_rounded, color: CP.textMuted, size: 48),
+                  const SizedBox(height: 12),
+                  Text('NO RESULTS FOUND', style: CP.mono(size: 12, color: CP.textMuted)),
+                  const SizedBox(height: 4),
+                  Text('"$query"', style: CP.rajdhani(size: 14, color: CP.textDim)),
+                ],
+              ),
+            );
+          }
+
+          return LayoutBuilder(
+            builder: (context, constraints) {
+              final w = constraints.maxWidth;
+              final cols = w >= 1200 ? 6 : w >= 900 ? 5 : w >= 700 ? 4 : 3;
+
+              return GridView.builder(
+                padding: const EdgeInsets.all(14),
+                gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+                  crossAxisCount: cols,
+                  childAspectRatio: 0.68,
+                  crossAxisSpacing: 10,
+                  mainAxisSpacing: 10,
+                ),
+                itemCount: results.length,
+                itemBuilder: (_, i) {
+                  final anime = results[i];
+                  return GestureDetector(
+                    onTap: () => Navigator.push(
+                      context,
+                      MaterialPageRoute(builder: (_) => DetailsScreen(media: anime)),
+                    ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Expanded(
+                          child: Container(
+                            decoration: CP.cardDecor,
+                            clipBehavior: Clip.hardEdge,
+                            child: Stack(
+                              children: [
+                                CachedNetworkImage(
+                                  imageUrl: anime.imageUrl,
+                                  fit: BoxFit.cover,
+                                  width: double.infinity,
+                                  height: double.infinity,
+                                  placeholder: (_, _) => Container(color: CP.surface),
+                                  errorWidget: (_, _, _) => Container(color: CP.surface),
+                                ),
+                                // Rating badge
+                                if (anime.rating != null)
+                                  Positioned(
+                                    top: 6,
+                                    right: 6,
+                                    child: Container(
+                                      padding: const EdgeInsets.symmetric(
+                                          horizontal: 6, vertical: 2),
+                                      decoration: BoxDecoration(
+                                        color: CP.bg.withValues(alpha: 0.8),
+                                        border: Border.all(
+                                            color: CP.cyan.withValues(alpha: 0.4)),
+                                        borderRadius: BorderRadius.circular(2),
+                                      ),
+                                      child: Text(
+                                        anime.rating!,
+                                        style: CP.mono(size: 9, color: CP.cyan),
                                       ),
                                     ),
                                   ),
-                                ),
-                              ),
+                              ],
                             ),
-                          ],
+                          ),
                         ),
-                      ),
+                        const SizedBox(height: 6),
+                        Text(
+                          anime.title.toString(),
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
+                          style: CP.rajdhani(size: 12, weight: FontWeight.w600),
+                        ),
+                      ],
                     ),
-                    const SizedBox(height: 8),
-                    Text(
-                      anime.title,
-                      maxLines: 2,
-                      overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: Colors.white),
-                    ),
-                  ],
-                ),
+                  );
+                },
               );
             },
           );
         },
-        loading: () => const Center(child: CircularProgressIndicator()),
-        error: (e, s) => Center(child: Text('Error: $e')),
+        loading: () => const Center(child: CircularProgressIndicator(color: CP.cyan)),
+        error: (e, _) => Center(child: Text('Error: $e', style: CP.mono(color: CP.magenta))),
       ),
     );
   }

@@ -11,7 +11,6 @@
 - **🚀 Native Performance**: Leveraging `media_kit` for blistering fast, hardware-accelerated video playback.
 - **📅 Stay Updated**: Real-time synchronization with **AniList** for trending, popular, and seasonal anime.
 - **🕒 Continue Watching**: Robust watch history tracking with progress bars for every episode.
-- **📥 Offline Mode**: Intelligent connectivity detection that automatically switches to your downloads when you're off the grid.
 - **🔍 Deep Discovery**: Advanced search capabilities and filtered categories to find exactly what you're looking for.
 - **📟 Terminal Access**: Built-in developer terminal for advanced insights and stream debugging.
 - **🎨 Premium UI**: A curated dark aesthetic featuring the *Outfit* typeface, smooth shimmer loading states, and dynamic hero sliders.

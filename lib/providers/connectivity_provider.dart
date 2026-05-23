@@ -1,3 +1,6 @@
+import 'dart:async';
+import 'dart:io';
+
 import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -5,21 +8,31 @@ enum ConnectivityStatus { online, offline, loading }
 
 final connectivityProvider = StreamProvider<ConnectivityStatus>((ref) async* {
   final connectivity = Connectivity();
-  
-  // Get initial status
-  final initial = await connectivity.checkConnectivity();
-  if (initial.contains(ConnectivityResult.none)) {
-    yield ConnectivityStatus.offline;
-  } else {
-    yield ConnectivityStatus.online;
+
+  Future<ConnectivityStatus> resolveStatus(List<ConnectivityResult> results) async {
+    if (results.contains(ConnectivityResult.none)) {
+      return ConnectivityStatus.offline;
+    }
+
+    try {
+      final lookup = await InternetAddress.lookup('example.com').timeout(
+        const Duration(seconds: 3),
+      );
+      if (lookup.isNotEmpty && lookup.first.rawAddress.isNotEmpty) {
+        return ConnectivityStatus.online;
+      }
+    } on SocketException {
+      return ConnectivityStatus.offline;
+    } on TimeoutException {
+      return ConnectivityStatus.offline;
+    }
+
+    return ConnectivityStatus.offline;
   }
 
-  // Monitor changes
+  yield await resolveStatus(await connectivity.checkConnectivity());
+
   await for (final results in connectivity.onConnectivityChanged) {
-    if (results.contains(ConnectivityResult.none)) {
-       yield ConnectivityStatus.offline;
-    } else {
-       yield ConnectivityStatus.online;
-    }
+    yield await resolveStatus(results);
   }
 });
