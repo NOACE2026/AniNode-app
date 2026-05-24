@@ -220,7 +220,7 @@ class ScraperApi {
 
       return ResolvedSource(
         streamUrl: url.isNotEmpty ? url : null,
-        referer: 'https://anikototv.to/',
+        referer: 'https://anikoto.cz/',
       );
     } catch (e) {
       debugPrint('Resolve error: $e');

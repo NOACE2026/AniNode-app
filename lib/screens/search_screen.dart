@@ -130,7 +130,7 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
                             child: Stack(
                               children: [
                                 CachedNetworkImage(
-                                  imageUrl: anime.imageUrl,
+                                  imageUrl: CP.imgUrl(anime.imageUrl, width: 240),
                                   fit: BoxFit.cover,
                                   width: double.infinity,
                                   height: double.infinity,

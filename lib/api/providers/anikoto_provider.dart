@@ -1,5 +1,5 @@
 import 'package:dio/dio.dart';
-import 'package:flutter/foundation.dart';
+import 'package:flutter/foundation.dart' show kIsWeb, debugPrint;
 
 // ── Result Models ────────────────────────────────────────────────────────
 
@@ -126,8 +126,23 @@ class Subtitle {
 // ── Anikoto Provider ─────────────────────────────────────────────────────
 
 class AnikotoProvider {
-  static const String baseUrl = 'https://anikototv.to';
+  static const String baseUrl = 'https://anikoto.cz';
   static const String apiUrl = 'https://anikotoapi.site';
+
+  // On web the browser blocks cross-origin requests unless the API sends CORS
+  // headers. Route through a proxy so the app works in the browser.
+  // Replace with your own Cloudflare Worker URL (free at workers.cloudflare.com).
+  // corsproxy.io blocks production domains on the free plan.
+  static const String _corsProxy = 'https://sparkling-credit-2ae7.ambitmisra.workers.dev/?url=';
+  // Build the full API URL with query params baked in, then wrap with the CORS
+  // proxy on web so the browser can read the cross-origin response.
+  static String _apiUrl(String path, Map<String, dynamic> params) {
+    final uri = Uri.parse('$apiUrl$path').replace(
+      queryParameters: params.map((k, v) => MapEntry(k, v.toString())),
+    );
+    final full = uri.toString();
+    return kIsWeb ? '$_corsProxy${Uri.encodeComponent(full)}' : full;
+  }
 
   // /recent-anime is paginated; we cache fetched pages to support
   // multi-page client-side filtering without re-hitting the API.
@@ -140,8 +155,13 @@ class AnikotoProvider {
   AnikotoProvider() {
     _dio = Dio();
     _dio.options.headers = {
-      'Accept': 'application/json',
-      'User-Agent': 'AniNodeMobile/1.0',
+      'Accept': 'application/json, text/plain, */*',
+      // Use a real browser UA — Cloudflare WAF blocks non-browser agents.
+      'User-Agent':
+          'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 '
+          '(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+      'Referer': 'https://anikoto.cz/',
+      'Origin': 'https://anikoto.cz',
     };
     _dio.options.connectTimeout = const Duration(seconds: 10);
     _dio.options.receiveTimeout = const Duration(seconds: 15);
@@ -179,8 +199,7 @@ class AnikotoProvider {
   Future<List<AnimeResult>> recent({int page = 1, int perPage = 30}) async {
     try {
       final resp = await _dio.get(
-        '$apiUrl/recent-anime',
-        queryParameters: {'page': page, 'per_page': perPage},
+        _apiUrl('/recent-anime', {'page': page, 'per_page': perPage}),
         options: Options(validateStatus: (s) => s != null && s < 600),
       );
       if (resp.statusCode != 200 || resp.data is! Map) return [];
@@ -205,8 +224,7 @@ class AnikotoProvider {
     while (page <= 100) {
       try {
         final resp = await _dio.get(
-          '$apiUrl/series/$seriesId',
-          queryParameters: {'page': page, 'per_page': 100},
+          _apiUrl('/series/$seriesId', {'page': page, 'per_page': 100}),
           options: Options(validateStatus: (s) => s != null && s < 600),
         );
         if (resp.statusCode != 200 || resp.data is! Map) {
@@ -265,8 +283,7 @@ class AnikotoProvider {
     for (int page = 1; page <= 3; page++) {
       try {
         final resp = await _dio.get(
-          '$apiUrl/recent-anime',
-          queryParameters: {'page': page, 'per_page': 50},
+          _apiUrl('/recent-anime', {'page': page, 'per_page': 50}),
           options: Options(validateStatus: (s) => s != null && s < 600),
         );
         if (resp.statusCode != 200 || resp.data is! Map) break;

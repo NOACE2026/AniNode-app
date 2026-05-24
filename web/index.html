@@ -1,0 +1,97 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <!--
+    If you are serving your web app in a path other than the root, change the
+    href value below to reflect the base path you are serving from.
+
+    The path provided below has to start and end with a slash "/" in order for
+    it to work correctly.
+
+    For more details:
+    * https://developer.mozilla.org/en-US/docs/Web/HTML/Element/base
+
+    This is a placeholder for base href that will be replaced by the value of
+    the `--base-href` argument provided to `flutter build`.
+  -->
+  <base href="$FLUTTER_BASE_HREF">
+
+  <meta charset="UTF-8">
+  <meta content="IE=Edge" http-equiv="X-UA-Compatible">
+  <meta name="description" content="AniNode — stream anime in sub or dub, track your watch history, and browse by genre.">
+  <meta name="keywords" content="anime, streaming, sub, dub, watch anime online, AniNode">
+  <meta name="theme-color" content="#06080F">
+
+  <!-- Open Graph / social preview -->
+  <meta property="og:type" content="website">
+  <meta property="og:title" content="AniNode">
+  <meta property="og:description" content="Stream anime in sub or dub. Browse new releases, track history, and watch in your browser.">
+  <meta property="og:image" content="icons/Icon-512.png">
+
+  <!-- Twitter card -->
+  <meta name="twitter:card" content="summary">
+  <meta name="twitter:title" content="AniNode">
+  <meta name="twitter:description" content="Stream anime in sub or dub — free, in your browser.">
+  <meta name="twitter:image" content="icons/Icon-512.png">
+
+  <!-- iOS meta tags & icons -->
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="AniNode">
+  <link rel="apple-touch-icon" href="icons/Icon-192.png">
+
+  <!-- Favicon -->
+  <link rel="icon" type="image/png" href="favicon.png"/>
+
+  <title>AniNode</title>
+  <link rel="manifest" href="manifest.json">
+</head>
+<body>
+  <!--
+    You can customize the "flutter_bootstrap.js" script.
+    This is useful to provide a custom configuration to the Flutter loader
+    or to give the user feedback during the initialization process.
+
+    For more details:
+    * https://docs.flutter.dev/platform-integration/web/initialization
+  -->
+  <script src="flutter_bootstrap.js" async></script>
+
+  <!--
+    Grant fullscreen permission to every iframe flutter_inappwebview creates.
+    Flutter CanvasKit hosts platform views inside shadow roots so plain
+    querySelectorAll misses them — we must recurse into every shadowRoot.
+    A MutationObserver + periodic interval cover both initial render and
+    late-mounted views.
+  -->
+  <script>
+    function _patchIframesIn(root) {
+      root.querySelectorAll('iframe').forEach(function (el) {
+        var cur = el.getAttribute('allow') || '';
+        if (!cur.includes('fullscreen')) {
+          el.setAttribute('allow', (cur ? cur + '; ' : '') +
+            'fullscreen; autoplay; encrypted-media; picture-in-picture');
+        }
+        el.allowFullscreen = true;
+      });
+      // Recurse into shadow roots
+      root.querySelectorAll('*').forEach(function (el) {
+        if (el.shadowRoot) _patchIframesIn(el.shadowRoot);
+      });
+    }
+    function patchAllIframes() { _patchIframesIn(document); }
+
+    // Poll every 800 ms for the first 30 s (covers late-mounted platform views)
+    var _fsTimer = setInterval(patchAllIframes, 800);
+    setTimeout(function () { clearInterval(_fsTimer); }, 30000);
+
+    // Also react to DOM changes
+    var _fsObs = new MutationObserver(patchAllIframes);
+    document.addEventListener('DOMContentLoaded', function () {
+      patchAllIframes();
+      _fsObs.observe(document.documentElement, { childList: true, subtree: true });
+    });
+  </script>
+</body>
+</html>

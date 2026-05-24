@@ -1,5 +1,7 @@
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:shimmer/shimmer.dart';
 
 abstract final class CP {
   // --- Color palette ---
@@ -87,6 +89,36 @@ abstract final class CP {
           ),
         ],
       );
+
+  // Shimmer loading placeholder — drop-in for CachedNetworkImage's placeholder.
+  static Widget shimmerBox({BorderRadius? radius}) => Shimmer.fromColors(
+        baseColor: surface,
+        highlightColor: const Color(0xFF0F1E38),
+        child: Container(
+          decoration: BoxDecoration(
+            color: Colors.white,
+            borderRadius: radius,
+          ),
+        ),
+      );
+
+  // --- Image URL helper ---
+  /// Flutter Web (CanvasKit) loads images via fetch() which enforces CORS.
+  ///
+  /// • anilist.co / anilistcdn.net → sends CORS headers natively; load direct.
+  /// • Everything else → route through images.weserv.nl (an image-specific
+  ///   proxy that adds CORS headers and serves WebP; has no anime-CDN blocklist).
+  /// • Native builds → URL returned unchanged.
+  static String imgUrl(String url, {int? width}) {
+    if (!kIsWeb || url.isEmpty) return url;
+    final host = Uri.tryParse(url)?.host ?? '';
+    if (host.contains('anilist.co') || host.contains('anilistcdn.net')) {
+      return url; // native CORS — no proxy needed
+    }
+    final encoded = Uri.encodeComponent(url);
+    final w = width != null ? '&w=$width' : '';
+    return 'https://images.weserv.nl/?url=$encoded$w&output=webp&q=82';
+  }
 
   // Neon-bordered chip
   static Widget chip(String label, {Color color = cyan}) => Container(

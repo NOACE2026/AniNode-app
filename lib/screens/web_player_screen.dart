@@ -1,6 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
-import 'dart:io';
+import 'package:flutter/foundation.dart' show kIsWeb, defaultTargetPlatform, TargetPlatform;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -8,6 +8,7 @@ import 'package:flutter_inappwebview/flutter_inappwebview.dart';
 import '../api/filler_service.dart';
 import '../providers/history_provider.dart';
 import '../theme/cp.dart';
+import 'local_player_server_io.dart' if (dart.library.html) 'local_player_server_web.dart';
 
 /// WebView-backed player utilizing flutter_inappwebview for robust cross-platform
 /// playback supporting Android, iOS, and Windows desktop targets inside the app.
@@ -185,8 +186,14 @@ class _WebPlayerScreenState extends ConsumerState<WebPlayerScreen> {
 
   EpisodeStream get _currentEpisode => widget.episodes[_currentIndex];
 
+  bool get _isDesktopOrWeb =>
+      kIsWeb ||
+      defaultTargetPlatform == TargetPlatform.windows ||
+      defaultTargetPlatform == TargetPlatform.linux ||
+      defaultTargetPlatform == TargetPlatform.macOS;
+
   Future<void> _allowAllOrientations() async {
-    if (Platform.isWindows || Platform.isLinux || Platform.isMacOS) return;
+    if (_isDesktopOrWeb) return;
     await SystemChrome.setPreferredOrientations([
       DeviceOrientation.portraitUp,
       DeviceOrientation.portraitDown,
@@ -205,27 +212,35 @@ class _WebPlayerScreenState extends ConsumerState<WebPlayerScreen> {
       return;
     }
 
-    if (LocalPlayerServer.port == null) {
-      setState(() {
-        _loading = false;
-        _error = 'Player server not ready — please retry';
-      });
-      return;
-    }
-
-    final localhostUrl = 'http://localhost:${LocalPlayerServer.port}/play?url=${Uri.encodeComponent(url)}';
-
     setState(() { _loading = true; _error = null; });
     _lastLoadAt = DateTime.now();
-    _web?.loadUrl(
-      urlRequest: URLRequest(
-        url: WebUri(localhostUrl),
-        headers: {
-          'Referer': 'https://anikototv.to/',
-          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-        },
-      ),
-    );
+
+    if (kIsWeb) {
+      // On web there is no localhost server — load the embed URL directly in the
+      // iframe. Clear the spinner immediately; the embed page shows its own loader.
+      _web?.loadUrl(urlRequest: URLRequest(url: WebUri(url)));
+      setState(() => _loading = false);
+      unawaited(_recordStartIfNew());
+      return;
+    } else {
+      if (LocalPlayerServer.port == null) {
+        setState(() {
+          _loading = false;
+          _error = 'Player server not ready — please retry';
+        });
+        return;
+      }
+      final localhostUrl = 'http://localhost:${LocalPlayerServer.port}/play?url=${Uri.encodeComponent(url)}';
+      _web?.loadUrl(
+        urlRequest: URLRequest(
+          url: WebUri(localhostUrl),
+          headers: {
+            'Referer': 'https://anikoto.cz/',
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+          },
+        ),
+      );
+    }
 
     // Mark this episode as "started" so the Continue Watching row picks it up
     // even before the player fires any time events. Must wait for history to
@@ -294,7 +309,7 @@ class _WebPlayerScreenState extends ConsumerState<WebPlayerScreen> {
   Widget build(BuildContext context) {
     return LayoutBuilder(builder: (context, c) {
       final landscape = c.maxWidth > c.maxHeight;
-      final isDesktop = Platform.isWindows || Platform.isLinux || Platform.isMacOS;
+      final isDesktop = _isDesktopOrWeb;
       if (isDesktop && c.maxWidth >= 900) return _buildDesktop(c);
       if (landscape && !isDesktop) return _buildFullscreen();
       return _buildPortrait(c);
@@ -320,17 +335,27 @@ class _WebPlayerScreenState extends ConsumerState<WebPlayerScreen> {
           cacheEnabled: false,
           userAgent:
               'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+          // Web: grant the iframe permission to call requestFullscreen() so
+          // the embed's own fullscreen button works natively in the browser.
+          iframeAllowFullscreen: true,
+          iframeAllow: 'fullscreen; autoplay; encrypted-media; picture-in-picture',
+          isElementFullscreenEnabled: true,
         ),
         onWebViewCreated: (controller) {
           _web = controller;
-          _web?.addJavaScriptHandler(
-            handlerName: 'PlayerChannel',
-            callback: (args) {
-              if (args.isNotEmpty) {
-                _handlePlayerMessage(args.first.toString());
-              }
-            },
-          );
+          // addJavaScriptHandler is not implemented on the web platform —
+          // the embed is a cross-origin iframe anyway so the bridge can't
+          // reach it. Only register the handler on native targets.
+          if (!kIsWeb) {
+            _web?.addJavaScriptHandler(
+              handlerName: 'PlayerChannel',
+              callback: (args) {
+                if (args.isNotEmpty) {
+                  _handlePlayerMessage(args.first.toString());
+                }
+              },
+            );
+          }
           if (LocalPlayerServer.port != null && !_loadTriggered) {
             _loadTriggered = true;
             _loadCurrent();
@@ -338,6 +363,11 @@ class _WebPlayerScreenState extends ConsumerState<WebPlayerScreen> {
         },
         onCreateWindow: (controller, _) async => false,
         shouldOverrideUrlLoading: (controller, navigationAction) async {
+          // On web the flutter_inappwebview renders as an <iframe> — there is no
+          // localhost wrapper, so the embed URL IS the main-frame URL. Allow all
+          // navigation; pop-under blocking is handled by onCreateWindow => false.
+          if (kIsWeb) return NavigationActionPolicy.ALLOW;
+
           final uri = navigationAction.request.url;
           if (uri == null) return NavigationActionPolicy.CANCEL;
           final urlStr = uri.toString();
@@ -371,25 +401,26 @@ class _WebPlayerScreenState extends ConsumerState<WebPlayerScreen> {
           return NavigationActionPolicy.ALLOW;
         },
         onLoadStart: (controller, url) {
-          // Only track loading state for our own localhost wrapper page.
-          // Megaplay's iframe navigations also fire this callback on WebView2
-          // (Windows) — ignoring them prevents the spinner from getting stuck.
-          if (!mounted) return;
+          // On web the embed URL is loaded directly — don't touch loading state
+          // here (it was already cleared in _loadCurrent). On native we only
+          // track our localhost wrapper page to avoid stale sub-frame events.
+          if (kIsWeb || !mounted) return;
           final urlStr = url?.toString() ?? '';
           if (urlStr.startsWith('http://localhost')) {
-            setState(() {
-              _loading = true;
-              _error = null;
-            });
+            setState(() { _loading = true; _error = null; });
           }
         },
         onLoadStop: (controller, url) async {
           if (!mounted) return;
           final urlStr = url?.toString() ?? '';
-          if (urlStr.startsWith('http://localhost')) {
+          // Native: clear spinner only for our localhost page.
+          // Web: spinner already cleared; just try to install the JS bridge.
+          if (!kIsWeb && urlStr.startsWith('http://localhost')) {
             setState(() => _loading = false);
           }
           // Install postMessage bridge on every page load (idempotent guard inside).
+          // On web this runs in the iframe scope — will silently fail for
+          // cross-origin iframes, which is expected and harmless.
           try {
             await controller.evaluateJavascript(source: '''
               (function() {
@@ -412,18 +443,17 @@ class _WebPlayerScreenState extends ConsumerState<WebPlayerScreen> {
           } catch (_) {}
         },
         onReceivedError: (controller, request, error) {
-          if (!mounted) return;
+          if (kIsWeb || !mounted) return;
           final url = request.url.toString();
           if ((request.isForMainFrame ?? false) && url.startsWith('http://localhost')) {
-            setState(() {
-              _loading = false;
-              _error = error.description;
-            });
+            setState(() { _loading = false; _error = error.description; });
           }
         },
         onEnterFullscreen: (controller) async {
-          if (!mounted) return;
-          if (Platform.isWindows || Platform.isLinux || Platform.isMacOS) {
+          // On web the browser owns fullscreen — the embed's native button
+          // triggers it directly. Don't touch Flutter layout or orientation.
+          if (kIsWeb || !mounted) return;
+          if (_isDesktopOrWeb) {
             setState(() => _desktopFullscreen = true);
             return;
           }
@@ -434,8 +464,8 @@ class _WebPlayerScreenState extends ConsumerState<WebPlayerScreen> {
           await SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
         },
         onExitFullscreen: (controller) async {
-          if (!mounted) return;
-          if (Platform.isWindows || Platform.isLinux || Platform.isMacOS) {
+          if (kIsWeb || !mounted) return;
+          if (_isDesktopOrWeb) {
             setState(() => _desktopFullscreen = false);
             return;
           }
@@ -507,13 +537,16 @@ class _WebPlayerScreenState extends ConsumerState<WebPlayerScreen> {
                         icon: Icons.skip_next_rounded,
                       ),
                     ),
-                  const SizedBox(width: 8),
-                  IconButton(
-                    tooltip: 'Fullscreen (F / Esc)',
-                    icon: const Icon(Icons.fullscreen_rounded, color: Colors.white),
-                    onPressed: _toggleDesktopFullscreen,
-                    splashRadius: 22,
-                  ),
+                  // Fullscreen on web is handled by the embed's own button.
+                  if (!kIsWeb) ...[
+                    const SizedBox(width: 8),
+                    IconButton(
+                      tooltip: 'Fullscreen (F / Esc)',
+                      icon: const Icon(Icons.fullscreen_rounded, color: Colors.white),
+                      onPressed: _toggleDesktopFullscreen,
+                      splashRadius: 22,
+                    ),
+                  ],
                 ],
               ),
             ),
@@ -541,7 +574,7 @@ class _WebPlayerScreenState extends ConsumerState<WebPlayerScreen> {
                     Positioned.fill(child: _persistentWebView),
                     if (_loading) _loadingOverlay(),
                     if (_error != null) _errorOverlay(),
-                    if (_desktopFullscreen)
+                    if (_desktopFullscreen && !kIsWeb)
                       Positioned(
                         top: 12,
                         right: 12,
@@ -570,6 +603,8 @@ class _WebPlayerScreenState extends ConsumerState<WebPlayerScreen> {
       body: Focus(
         autofocus: true,
         onKeyEvent: (node, event) {
+          // On web the browser owns keyboard shortcuts for fullscreen.
+          if (kIsWeb) return KeyEventResult.ignored;
           if (event is KeyDownEvent) {
             if (event.logicalKey == LogicalKeyboardKey.escape &&
                 _desktopFullscreen) {
@@ -1087,76 +1122,3 @@ class _EpisodeGridItem extends StatelessWidget {
   }
 }
 
-class LocalPlayerServer {
-  static HttpServer? _server;
-  static int? port;
-  static int _refCount = 0;
-
-  static Future<void> start() async {
-    _refCount++;
-    if (_server != null) return;
-    try {
-      _server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
-      port = _server!.port;
-      debugPrint('LocalPlayerServer started on port $port');
-
-      _server!.listen((HttpRequest request) async {
-        if (request.uri.path == '/play') {
-          final url = request.uri.queryParameters['url'] ?? '';
-          final html = '''
-<!DOCTYPE html>
-<html>
-<head>
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-  <style>
-    html, body {
-      margin: 0;
-      padding: 0;
-      width: 100%;
-      height: 100%;
-      background-color: black;
-      overflow: hidden;
-    }
-    iframe {
-      position: absolute;
-      top: 0;
-      left: 0;
-      width: 100%;
-      height: 100%;
-      border: 0;
-    }
-  </style>
-</head>
-<body>
-  <iframe src="$url" allow="autoplay; fullscreen; encrypted-media; picture-in-picture" allowfullscreen="true" webkitallowfullscreen="true" mozallowfullscreen="true"></iframe>
-</body>
-</html>
-''';
-          request.response
-            ..headers.contentType = ContentType.html
-            ..write(html);
-          await request.response.close();
-        } else {
-          request.response
-            ..statusCode = HttpStatus.notFound
-            ..write('Not Found');
-          await request.response.close();
-        }
-      }, onError: (err) {
-        debugPrint('LocalPlayerServer error: \$err');
-      });
-    } catch (e) {
-      debugPrint('Error starting LocalPlayerServer: \$e');
-    }
-  }
-
-  static void stop() {
-    _refCount = (_refCount - 1).clamp(0, 999);
-    if (_refCount > 0) return; // another player instance is still using the server
-    try {
-      _server?.close(force: true);
-    } catch (_) {}
-    _server = null;
-    port = null;
-  }
-}

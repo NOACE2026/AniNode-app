@@ -295,8 +295,11 @@ class _DetailsScreenState extends ConsumerState<DetailsScreen> {
                 fit: StackFit.expand,
                 children: [
                   CachedNetworkImage(
-                    imageUrl: _getBannerUrl(),
+                    imageUrl: CP.imgUrl(_getBannerUrl(), width: 900),
                     fit: BoxFit.cover,
+                    memCacheWidth: 900,
+                    fadeInDuration: const Duration(milliseconds: 200),
+                    placeholder: (_, _) => CP.shimmerBox(),
                     errorWidget: (_, _, _) => Container(color: CP.surface),
                   ),
                   Container(

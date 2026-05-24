@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:ui';
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:flutter_inappwebview/flutter_inappwebview.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -636,9 +637,11 @@ class _HeroBillboard extends ConsumerWidget {
           // so upscaling doesn't look blurry/pixelated.
           Positioned.fill(
             child: CachedNetworkImage(
-              imageUrl: banner,
+              imageUrl: CP.imgUrl(banner, width: 900),
               fit: BoxFit.cover,
-              placeholder: (_, _) => Container(color: CP.surface),
+              memCacheWidth: 900,
+              fadeInDuration: const Duration(milliseconds: 200),
+              placeholder: (_, _) => CP.shimmerBox(),
               errorWidget: (_, _, _) => Container(color: CP.surface),
             ),
           ),
@@ -665,9 +668,11 @@ class _HeroBillboard extends ConsumerWidget {
                     fit: StackFit.expand,
                     children: [
                       CachedNetworkImage(
-                        imageUrl: posterRaw!,
+                        imageUrl: CP.imgUrl(posterRaw!, width: 400),
                         fit: BoxFit.cover,
-                        placeholder: (_, _) => Container(color: CP.surface),
+                        memCacheWidth: 400,
+                        fadeInDuration: const Duration(milliseconds: 200),
+                        placeholder: (_, _) => CP.shimmerBox(),
                         errorWidget: (_, _, _) => Container(color: CP.surface),
                       ),
                       DecoratedBox(
@@ -981,7 +986,7 @@ class _CyberAppBar extends ConsumerWidget implements PreferredSizeWidget {
             onPressed: () async {
               Navigator.pop(c);
               await ref.read(historyProvider.notifier).clearAll();
-              await InAppWebViewController.clearAllCache();
+              if (!kIsWeb) await InAppWebViewController.clearAllCache();
             },
             child: Text('CLEAR', style: CP.mono(color: CP.yellow)),
           ),
@@ -1054,8 +1059,11 @@ class _HistoryList extends ConsumerWidget {
                 fit: StackFit.expand,
                 children: [
                   CachedNetworkImage(
-                    imageUrl: item.imageUrl ?? '',
+                    imageUrl: CP.imgUrl(item.imageUrl ?? '', width: 400),
                     fit: BoxFit.cover,
+                    memCacheWidth: 400,
+                    fadeInDuration: const Duration(milliseconds: 150),
+                    placeholder: (_, _) => CP.shimmerBox(),
                     errorWidget: (_, _, _) => Container(color: CP.surface),
                   ),
                   DecoratedBox(
@@ -1256,9 +1264,11 @@ class _Top10Row extends StatelessWidget {
                           fit: StackFit.expand,
                           children: [
                             CachedNetworkImage(
-                              imageUrl: image,
+                              imageUrl: CP.imgUrl(image, width: 280),
                               fit: BoxFit.cover,
-                              placeholder: (_, _) => Container(color: CP.surface),
+                              memCacheWidth: 280,
+                              fadeInDuration: const Duration(milliseconds: 150),
+                              placeholder: (_, _) => CP.shimmerBox(radius: BorderRadius.circular(6)),
                               errorWidget: (_, _, _) => Container(color: CP.surface),
                             ),
                             DecoratedBox(
@@ -1475,9 +1485,11 @@ class _PosterGrid extends StatelessWidget {
                       fit: StackFit.expand,
                       children: [
                         CachedNetworkImage(
-                          imageUrl: image,
+                          imageUrl: CP.imgUrl(image, width: 280),
                           fit: BoxFit.cover,
-                          placeholder: (_, _) => Container(color: CP.surface),
+                          memCacheWidth: 280,
+                          fadeInDuration: const Duration(milliseconds: 150),
+                          placeholder: (_, _) => CP.shimmerBox(),
                           errorWidget: (_, _, _) => Container(color: CP.surface),
                         ),
                         DecoratedBox(
@@ -1618,9 +1630,11 @@ class _PosterCard extends StatelessWidget {
             fit: StackFit.expand,
             children: [
               CachedNetworkImage(
-                imageUrl: image,
+                imageUrl: CP.imgUrl(image, width: 280),
                 fit: BoxFit.cover,
-                placeholder: (_, _) => Container(color: CP.surface),
+                memCacheWidth: 280,
+                fadeInDuration: const Duration(milliseconds: 150),
+                placeholder: (_, _) => CP.shimmerBox(radius: BorderRadius.circular(6)),
                 errorWidget: (_, _, _) => Container(color: CP.surface),
               ),
               DecoratedBox(

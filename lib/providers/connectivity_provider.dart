@@ -1,7 +1,8 @@
 import 'dart:async';
-import 'dart:io';
+import 'dart:io' if (dart.library.html) '../stubs/io_stub.dart';
 
 import 'package:connectivity_plus/connectivity_plus.dart';
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 enum ConnectivityStatus { online, offline, loading }
@@ -13,6 +14,8 @@ final connectivityProvider = StreamProvider<ConnectivityStatus>((ref) async* {
     if (results.contains(ConnectivityResult.none)) {
       return ConnectivityStatus.offline;
     }
+    // On web, trust connectivity_plus (navigator.onLine) — dart:io DNS lookup unavailable.
+    if (kIsWeb) return ConnectivityStatus.online;
 
     try {
       final lookup = await InternetAddress.lookup('example.com').timeout(
